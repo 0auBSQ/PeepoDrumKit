@@ -1,10 +1,88 @@
-<svg xmlns="http://www.w3.org/2000/svg" id="Layer_2" data-name="Layer 2" viewBox="0 0 105 105" transform="matrix(-1, 0, 0, 1, 0, 0)">
-  <g id="don">
-    <circle id="Circle_Outter" data-name="Circle Outter" cx="52.5" cy="52.5" r="52.5" fill="#033649"/>
-    <circle id="Circle_Middle" data-name="Circle Middle" cx="52.5" cy="52.5" r="48" fill="#e8ddcb"/>
-    <circle id="Circle_Inner" data-name="Circle Inner" cx="52.5" cy="52.5" r="39" fill="#E8DDCB"/>
-    <path id="Mouth" d="M35.375,65.063c1.93,3.096,5.388,4.855,8.875,4.5,4.083-.415,7.509-2.781,8.25-7.063,.973,4.596,4.799,6.973,9,7.063,5.002,.107,7.912-4.325,8.062-4.563" fill="none" stroke="#033649" stroke-linejoin="bevel" stroke-width="2"/>
-    <ellipse id="Eye_Right" data-name="Eye Right" cx="74.5" cy="48.5" rx="8.5" ry="9" fill="#033649"/>
-    <ellipse id="Eye_Left" data-name="Eye Left" cx="30.5" cy="48.5" rx="8.5" ry="9" fill="#033649"/>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   id="Layer_2"
+   data-name="Layer 2"
+   viewBox="0 0 105 105"
+   transform="matrix(-1, 0, 0, 1, 0, 0)"
+   version="1.1"
+   sodipodi:docname="game_note_adlib.svg"
+   inkscape:version="1.4 (86a8ad7, 2024-10-11)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="7.6857143"
+     inkscape:cx="52.5"
+     inkscape:cy="52.5"
+     inkscape:window-width="1920"
+     inkscape:window-height="1009"
+     inkscape:window-x="1042"
+     inkscape:window-y="373"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="Layer_2" />
+  <g
+     id="don">
+    <circle
+       id="Circle_Outter"
+       data-name="Circle Outter"
+       cx="52.5"
+       cy="52.5"
+       r="52.5"
+       fill="#033649" />
+    <circle
+       id="Circle_Middle"
+       data-name="Circle Middle"
+       cx="52.5"
+       cy="52.5"
+       r="48"
+       fill="#e8ddcb" />
+    <circle
+       id="Circle_Inner"
+       data-name="Circle Inner"
+       cx="52.5"
+       cy="52.5"
+       r="39"
+       fill="#E8DDCB" />
+    <path
+       id="Mouth"
+       d="M35.375,65.063c1.93,3.096,5.388,4.855,8.875,4.5,4.083-.415,7.509-2.781,8.25-7.063,.973,4.596,4.799,6.973,9,7.063,5.002,.107,7.912-4.325,8.062-4.563"
+       fill="none"
+       stroke="#033649"
+       stroke-linejoin="bevel"
+       stroke-width="2" />
+    <ellipse
+       id="Eye_Right"
+       data-name="Eye Right"
+       cx="74.5"
+       cy="48.5"
+       rx="8.5"
+       ry="9"
+       fill="#033649" />
+    <ellipse
+       id="Eye_Left"
+       data-name="Eye Left"
+       cx="30.5"
+       cy="48.5"
+       rx="8.5"
+       ry="9"
+       fill="#033649" />
   </g>
+  <rect
+     style="fill:#e8ddcb;fill-opacity:1"
+     id="rect1"
+     width="67.527885"
+     height="38.903351"
+     x="18.866171"
+     y="36.301117" />
 </svg>
