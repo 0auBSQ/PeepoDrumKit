@@ -1,5 +1,6 @@
 #pragma once
 #include "core_types.h"
+#include "core_version.h"
 
 namespace BuildInfo
 {
@@ -36,6 +37,6 @@ namespace BuildInfo
 	constexpr cstr CompilationTime() { return TimeFormattedAs_mm_hh_ss; }
 	constexpr cstr CompilationDate() { return DateFormattedAs_yyyy_MM_dd; }
 	constexpr cstr BuildConfiguration() { return PEEPO_DEBUG ? "Debug" : PEEPO_RELEASE ? "Release" : "Unknown"; }
-	constexpr cstr CurrentVersion() { return "v1.1"; }
+	constexpr cstr CurrentVersion() { return PEEPO_VERSION_STR; }
 	inline const Date CompilationDateParsed = Date::FromString(DateFormattedAs_yyyy_MM_dd);
 }

@@ -8,6 +8,7 @@
 *.h diff=cpp
 *.h++ diff=cpp
 *.hh diff=cpp
+*.rc text
 
 # Compiled Object files
 *.slo binary

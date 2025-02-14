@@ -161,6 +161,7 @@
     <ClInclude Include="src\audio\audio_file_formats.h" />
     <ClInclude Include="src\audio\audio_waveform.h" />
     <ClInclude Include="src\audio\audio_backend.h" />
+    <ClInclude Include="src\core_version.h" />
     <ClInclude Include="src\core_build_info.h" />
     <ClInclude Include="src\core_io.h" />
     <ClInclude Include="src\core_string.h" />

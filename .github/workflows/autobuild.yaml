@@ -1,0 +1,241 @@
+# Original script from totoa553/OpenTaiko and DragonRatTiger/OpenTaiko
+
+name: Build PeepoDrumKit
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    permissions:
+      # Give the default GITHUB_TOKEN write permission to commit and push the
+      # added or changed files to the repository.
+      contents: write
+
+    env:
+      messagePathPrefix: COMMIT_MSG_
+      versionsPath: COMMIT_VERSIONS
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Observe the Directory
+        shell: cmd
+        run: |
+          dir
+
+      - name: Get each commit message for version checking
+        id: get-latest-commits
+        run: |
+          $messages = ConvertFrom-Json $env:messagesJson
+          $nMessages = $messages.Count
+          echo "nMessages=$nMessages" >> $env:GITHUB_ENV
+          for ($c = 0; $c -lt $nMessages; ++$c) {
+              New-Item -Path ($env:messagePathPrefix + $c) -Type file
+              $message = $messages | Select-Object -Index $c
+              echo $message > ($env:messagePathPrefix + $c)
+          }
+        env:
+          messagesJson: ${{ toJSON(github.event.commits.*.message) }}
+
+      - name: Get project version from core_version.h
+        id: get-version
+        run: |
+          $core_version_h = Get-Content src/core_version.h
+          # Ensure list type for []-indexing
+          if ($core_version_h.Count -eq 1) {
+              $core_version_h = , $core_version_h
+          }
+
+          for ($i = 0; $i -lt $core_version_h.Count; ++$i) {
+              if (-not ($core_version_h[$i] -match '^\s*#define\s+PEEPO_VERSION_STR\s+"v?(?<version>[^"]*)".*$')) {
+                  continue
+              }
+              $projectVersion = $matches['version']
+              echo "projectVersion=$projectVersion" >> $env:GITHUB_ENV
+              break
+          }
+
+      - name: Extract latest version info from each commit message
+        id: extract-versions
+        run: |
+          $hasVersion = $false
+          $version = $env:projectVersion
+          New-Item -Path $env:versionsPath -Type file
+          for ($c = 0; $c -lt $env:nMessages; ++$c) {
+              $commitSubject = Get-Content -Path ($env:messagePathPrefix + $c) | Select-Object -First 1
+              if ($commitSubject -match '^v?(?<version>[0-9]+(?:\.[0-9]+(?:\.[0-9]+(?:\.[0-9]+)?)?)?(?:[^0-9]+\S*)?)\s-\s') {
+                  $hasVersion = $true
+                  $version = $matches['version']
+              }
+              if ($c -eq 0) {
+                  echo "versionFirst=$version" >> $env:GITHUB_ENV
+              }
+              echo $version >> $env:versionsPath
+          }
+
+          # check the latest version
+          if ($hasVersion) {
+              Write-Host "Extracted latest version is: $version"
+              echo "version=$version" >> $env:GITHUB_ENV
+          } else {
+              Write-Host "No valid version found in the latest commit messages. Skipping bump."
+              echo "version=" >> $env:GITHUB_ENV
+          }
+          echo "versionLast=$version" >> $env:GITHUB_ENV
+
+      - name: Bump PeepoDrumKit version if necessary
+        if: env.version != ''
+        run: |
+          $newVersion = $env:version
+          Write-Host "Updating version in core_version.h to $newVersion"
+          $version4 = "0,0,0,0"
+          if ($newVersion -match '^v?(?:(?<versionM>[0-9]+)(?:\.(?<versionN>[0-9]+)(?:\.(?<versionP>[0-9]+)(?:\.(?<versionQ>[0-9]+))?)?)?(?:[^0-9]+\S*)?)$') {
+            $versionM = $matches['versionM']
+            $versionN = $matches['versionN'] ?? 0
+            $versionP = $matches['versionP'] ?? 0
+            $versionQ = $matches['versionQ'] ?? 0
+            $version4 = "$versionM,$versionN,$versionP,$versionQ"
+          }
+          (Get-Content src/core_version.h) `
+            -replace '^\s*#define\s+PEEPO_VERSION_STR\s+.*$',"#define PEEPO_VERSION_STR `"v$newVersion`"" `
+            -replace '^\s*#define\s+PEEPO_VERSION_FOUR_PART\s+.*$',"#define PEEPO_VERSION_FOUR_PART $version4" `
+            | Set-Content src/core_version.h
+
+      - name: Get current date
+        id: get-date
+        run: |
+          $date = Get-Date -Format "yyyy-MM-dd"
+          echo "date=$date" >> $env:GITHUB_ENV
+
+      - name: Update CHANGELOG.md
+        run: |
+          $versions = Get-Content -Path $env:versionsPath
+          $date = $env:date
+          $changelogPath = "CHANGELOG.md"
+
+          :commit for ($c = 0; $c -lt $env:nMessages; ++$c) {
+              # (Re-)read CHANGELOG.md content as (re-)split lines
+              $changelog = try { Get-Content -Path $changelogPath -ErrorAction Stop } catch { "" }
+              # Ensure list type for []-indexing
+              if ($changelog.Count -eq 1) {
+                  $changelog = , $changelog
+              }
+
+              # Read the message as individual items
+              $commitBody = Get-Content -Path ($env:messagePathPrefix + $c) | Select-Object -Skip 1
+
+              # Remove empty lines from the message
+              $message = ($commitBody | Where-Object { $_ -ne "" }) -join "`n"
+
+              # Check if the version already exists
+              $version = $versions | Select-Object -Index $c
+              for ($i = 0; $i -lt $changelog.Count; ++$i) {
+                  if (-not ($changelog[$i] -match "## \[$version\]")) {
+                      continue
+                  }
+                  # Capture the existing content under the version heading
+                  if ($message) {
+                      # Append after the empty line (if exist) or the heading
+                      $di = ($changelog[$i + 1] -eq "")
+                      $changelog[$i + $di] += "`n$message"
+                  }
+
+                  # Write updated content back to CHANGELOG.md
+                  Set-Content -Path $changelogPath -Value $changelog
+
+                  continue commit
+              }
+
+              # Insert new version under '# Changelog'
+              for ($i = 0; $i -lt $changelog.Count; ++$i) {
+                  if (-not ($changelog[$i] -match "# Changelog")) {
+                      continue
+                  }
+                  # Append after the title, create empty line space
+                  $changelog[$i] += "`n`n## [$version] - $date (Beta)`n`n"
+                  if ($message) {
+                      $changelog[$i] += "$message`n"
+                  }
+                  # Remove original empty line space
+                  while (++$i -lt $changelog.Count) {
+                      if ($changelog[$i] -ne "") {
+                          break
+                      }
+                      $changelog[$i] = $null
+                  }
+
+                  # Write updated content back to CHANGELOG.md
+                  Set-Content -Path $changelogPath -Value $changelog
+
+                  continue commit
+              }
+
+              # No '# Changelog', do nothing
+              break commit
+          }
+
+      - name: Commit CHANGELOG.md and core_version.h changes
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add src/core_version.h
+          git add CHANGELOG.md
+          if ($env:versionLast -eq $env:versionFirst) {
+              git commit -m "Update changelog for version $env:versionLast"
+          } else {
+              git commit -m "Update changelog for versions $env:versionFirst to $env:versionLast"
+          }
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} HEAD:${{ github.ref }}
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build for Windows x64
+        run: |
+          msbuild --% PeepoDrumKitGui.vcxproj -maxCpuCount -target:rebuild -property:Configuration=Release;Platform=x64
+
+      - name: Create Archive (Win x64)
+        shell: cmd
+        run: |
+          cd build/bin/x64-Release && (
+            7z a ../../../PeepoDrumKit.Win.x64.zip *.*
+            cd ../../..
+          )
+          7z u PeepoDrumKit.Win.x64.zip "assets" "locales" "*.md"
+
+      - name: Check if tag exists
+        uses: mukunku/tag-exists-action@v1.6.0
+        id: check-tag
+        with:
+          tag: v${{ env.version }}
+
+      - name: Create Release
+        if: steps.check-tag.outputs.exists == 'false' && env.version != ''
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ env.version }}
+          release_name: PeepoDrumKit v${{ env.version }}
+          draft: false
+          prerelease: false
+
+      - name: Observe the Directory
+        shell: cmd
+        run: |
+          dir
+
+      - name: Upload All Builds for the Latest Release
+        uses: xresloader/upload-to-github-release@v1.6.0
+        with:
+          file: "PeepoDrumKit.Win.x64.zip"
+          overwrite: true
+          tag_name: v${{ env.versionLast }}
+          draft: false
+          token: ${{ secrets.GITHUB_TOKEN }}
