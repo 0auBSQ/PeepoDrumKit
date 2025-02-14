@@ -318,7 +318,7 @@ namespace PeepoDrumKit
 			std::string_view CurrentSection = "";
 
 			struct SectionIt { std::string_view Line, Section; };
-			struct KeyValueIt { std::string_view Line, Key, Value; };
+			struct KeyValueIt { std::string_view Line, Key, Value, ValueUntrimmed; };
 
 			inline void Error(cstr errorMessage) { Result.HasError = true; Result.ErrorLineIndex = LineIndex; Result.ErrorMessage = errorMessage; }
 			inline void Error_InvalidInt() { Error("Invalid int"); }
@@ -336,21 +336,22 @@ namespace PeepoDrumKit
 						if (Result.HasError)
 							return;
 
-						line = ASCII::Trim(line);
+						line = ASCII::TrimLeft(line);
 						if (ASCII::IsAllWhitespace(line) || line[0] == ';' || line[0] == '#')
 							return;
 
 						const size_t commentIndex = line.find_first_of(';');
 						if (commentIndex != std::string_view::npos)
-							line = ASCII::TrimRight(line.substr(0, commentIndex));
+							line = line.substr(0, commentIndex);
 
 						if (line[0] == '[')
 						{
-							const size_t clsoingIndex = line.find_first_of(']');
-							if (clsoingIndex == std::string_view::npos)
+							line = ASCII::TrimRight(line);
+							const size_t closingIndex = line.find_first_of(']');
+							if (closingIndex == std::string_view::npos)
 								return Error("Missing closing ']' for section");
 
-							if (clsoingIndex != line.size() - 1)
+							if (closingIndex != line.size() - 1)
 								return Error("Unexpected trailing data");
 
 							const std::string_view section = ASCII::Trim(line.substr(sizeof('['), line.size() - (sizeof('[') + sizeof(']'))));
@@ -364,13 +365,17 @@ namespace PeepoDrumKit
 							if (separatorIndex == std::string_view::npos)
 								return Error("Missing '=' separator");
 
-							const std::string_view key = ASCII::Trim(line.substr(0, separatorIndex));
-							const std::string_view value = ASCII::Trim(line.substr(separatorIndex + 1));
+							const std::string_view keyUntrimmed = line.substr(0, separatorIndex);
+							const std::string_view key = ASCII::TrimRight(keyUntrimmed);
+							const std::string_view valueUntrimmed = ASCII::TrimPrefix(
+								line.substr(separatorIndex + 1),
+								keyUntrimmed.substr(key.length())); // Remove balanced spaces around `=`
+							const std::string_view value = ASCII::Trim(valueUntrimmed);
 
 							if (key.empty())
 								return Error("Empty key");
 
-							keyValueFunc(KeyValueIt{ line, key, value });
+							keyValueFunc(KeyValueIt{ line, key, value, valueUntrimmed });
 						}
 					});
 			}

@@ -211,7 +211,7 @@ namespace PeepoDrumKit::i18n
 			if (keyValue.Key.size() != 13 || keyValue.Key.substr(0, 5) != "HASH_") return;
 			try {
 				u32 hash = std::stoul(std::string(keyValue.Key.substr(5)), nullptr, 16);
-				HashStringMap[hash] = keyValue.Value;
+				HashStringMap[hash] = keyValue.ValueUntrimmed;
 			}
 			catch (std::exception _e)
 			{
