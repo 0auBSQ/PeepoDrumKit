@@ -79,6 +79,7 @@ namespace PeepoDrumKit
 		Lyrics,
 		ScrollType,
 		JPOSScroll,
+		Delay,
 		Count,
 
 		NoteBranches_First = Notes_Normal,
@@ -98,6 +99,7 @@ namespace PeepoDrumKit
 		"EVENT_LYRICS",
 		"EVENT_SCROLL_TYPE",
 		"EVENT_JPOS_SCROLL",
+		"EVENT_DELAY",
 	};
 
 	constexpr GenericList TimelineRowToGenericList(TimelineRowType row)
@@ -115,6 +117,7 @@ namespace PeepoDrumKit
 		case TimelineRowType::Lyrics: return GenericList::Lyrics;
 		case TimelineRowType::ScrollType: return GenericList::ScrollType;
 		case TimelineRowType::JPOSScroll: return GenericList::JPOSScroll;
+		case TimelineRowType::Delay: return GenericList::DelayChanges;
 		default: assert(false); return GenericList::Count;
 		}
 	}
@@ -134,6 +137,7 @@ namespace PeepoDrumKit
 		case GenericList::Lyrics: return TimelineRowType::Lyrics;
 		case GenericList::ScrollType: return TimelineRowType::ScrollType;
 		case GenericList::JPOSScroll: return TimelineRowType::JPOSScroll;
+		case GenericList::DelayChanges: return TimelineRowType::Delay;
 		default: assert(false); return TimelineRowType::Count;
 		}
 	}

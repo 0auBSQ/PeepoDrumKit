@@ -53,9 +53,19 @@ namespace PeepoDrumKit
 		Undo::UndoHistory Undo;
 
 	public:
-		inline Time BeatToTime(Beat beat) const { return ChartSelectedCourse->TempoMap.BeatToTime(beat); }
-		inline Beat TimeToBeat(Time time) const { return ChartSelectedCourse->TempoMap.TimeToBeat(time); }
-		inline Beat TimeToBeat(Time time, bool truncTo0) const { return ChartSelectedCourse->TempoMap.TimeToBeat(time, truncTo0); }
+		// Delay-aware beat/time conversions: all timeline display and interaction uses these.
+		inline Time BeatToTime(Beat beat) const
+		{
+			return Time::FromSec(ChartSelectedCourse->TempoMap.BeatToTime(beat).Seconds
+				+ GetDelayAtBeat(ChartSelectedCourse->DelayChanges, beat).Seconds);
+		}
+		inline Beat TimeToBeat(Time effectiveTime) const
+		{
+			Beat b; EffectiveTimeToBeat(ChartSelectedCourse->TempoMap, ChartSelectedCourse->DelayChanges, effectiveTime, b); return b;
+		}
+		inline Beat TimeToBeat(Time effectiveTime, bool /*truncTo0*/) const { return TimeToBeat(effectiveTime); }
+		// Raw (undelayed) conversion — for internal audio/tempo use only.
+		inline Time RawBeatToTime(Beat beat) const { return ChartSelectedCourse->TempoMap.BeatToTime(beat); }
 		inline f64 BeatAndTimeToHBScrollBeatTick(Beat beat, Time time) const { return ChartSelectedCourse->TempoMap.BeatAndTimeToHBScrollBeatTick(beat, time); }
 
 		void ResetChartsCompared() { ChartsCompared = { { ChartSelectedCourse, { ChartSelectedBranch } } }; CompareMode = false; }
@@ -96,7 +106,7 @@ namespace PeepoDrumKit
 			else
 			{
 				SongVoice.SetIsPlaying(false);
-				CursorBeatWhilePaused = ChartSelectedCourse->TempoMap.TimeToBeat((SongVoice.GetPosition() + Chart.SongOffset));
+				CursorBeatWhilePaused = TimeToBeat(SongVoice.GetPosition() + Chart.SongOffset); // delay-aware
 				SfxVoicePool.PauseAllFutureVoices();
 			}
 		}
@@ -104,54 +114,58 @@ namespace PeepoDrumKit
 		inline Time GetCursorTime() const
 		{
 			if (SongVoice.GetIsPlaying())
-				return (SongVoice.GetPositionSmooth() + Chart.SongOffset);
+				return (SongVoice.GetPositionSmooth() + Chart.SongOffset); // audio time == effective time
 			else
-				return ChartSelectedCourse->TempoMap.BeatToTime(CursorBeatWhilePaused);
+				return BeatToTime(CursorBeatWhilePaused); // delay-aware
 		}
 
-		inline Beat GetCursorBeat() const
-		{
-			return GetCursorBeat(false);
-		}
-
-		inline Beat GetCursorBeat(bool truncTo0) const
+		inline Beat GetCursorBeat() const { return GetCursorBeat(false); }
+		inline Beat GetCursorBeat(bool /*truncTo0*/) const
 		{
 			if (SongVoice.GetIsPlaying())
-				return ChartSelectedCourse->TempoMap.TimeToBeat((SongVoice.GetPositionSmooth() + Chart.SongOffset), truncTo0);
+				return TimeToBeat(SongVoice.GetPositionSmooth() + Chart.SongOffset); // delay-aware
 			else
 				return CursorBeatWhilePaused;
 		}
 
 		// NOTE: Specifically to make sure the cursor time and beat are both in sync (as the song voice position is updated asynchronously)
-		inline BeatAndTime GetCursorBeatAndTime() const
+		inline BeatAndTime GetCursorBeatAndTime() const { return GetCursorBeatAndTime(false); }
+		inline BeatAndTime GetCursorBeatAndTime(bool truncTo0) const { return GetCursorBeatAndTime(ChartSelectedCourse, truncTo0); }
+		inline BeatAndTime GetCursorBeatAndTime(const ChartCourse* course, bool /*truncTo0*/) const
 		{
-			return GetCursorBeatAndTime(false);
+			if (SongVoice.GetIsPlaying())
+			{
+				const Time t = (SongVoice.GetPositionSmooth() + Chart.SongOffset);
+				Beat b; EffectiveTimeToBeat(course->TempoMap, course->DelayChanges, t, b);
+				return { b, t };
+			}
+			else
+			{
+				const Beat b = CursorBeatWhilePaused;
+				return { b, Time::FromSec(course->TempoMap.BeatToTime(b).Seconds + GetDelayAtBeat(course->DelayChanges, b).Seconds) };
+			}
 		}
 
-		inline BeatAndTime GetCursorBeatAndTime(bool truncTo0) const
+		inline void SetCursorTime(Time newEffectiveTime)
 		{
-			return GetCursorBeatAndTime(ChartSelectedCourse, truncTo0);
-		}
-
-		inline BeatAndTime GetCursorBeatAndTime(const ChartCourse* course, bool truncTo0) const
-		{
-			if (SongVoice.GetIsPlaying()) { const Time t = (SongVoice.GetPositionSmooth() + Chart.SongOffset); return { course->TempoMap.TimeToBeat(t, truncTo0), t }; }
-			else { const Beat b = CursorBeatWhilePaused; return { b, course->TempoMap.BeatToTime(b) }; }
-		}
-
-		inline void SetCursorTime(Time newTime)
-		{
-			SongVoice.SetPosition(newTime - Chart.SongOffset);
-			CursorNonSmoothTimeThisFrame = CursorNonSmoothTimeLastFrame = newTime;
-			CursorBeatWhilePaused = ChartSelectedCourse->TempoMap.TimeToBeat(newTime);
-			CursorTimeOnPlaybackStart = newTime;
+			Beat b; EffectiveTimeToBeat(ChartSelectedCourse->TempoMap, ChartSelectedCourse->DelayChanges, newEffectiveTime, b);
+			// Position audio at effective time so GetCursorTime() stays consistent between paused and playing
+			SongVoice.SetPosition(newEffectiveTime - Chart.SongOffset);
+			// Set slightly before futureOffset (1/25s) so notes at cursor position trigger on first play frame
+			static constexpr f64 futureOffsetSec = 1.0 / 25.0;
+			CursorNonSmoothTimeThisFrame = CursorNonSmoothTimeLastFrame = Time::FromSec(newEffectiveTime.Seconds - futureOffsetSec);
+			CursorBeatWhilePaused = b;
+			CursorTimeOnPlaybackStart = newEffectiveTime;
 		}
 
 		inline void SetCursorBeat(Beat newBeat)
 		{
-			const Time newTime = ChartSelectedCourse->TempoMap.BeatToTime(newBeat);
+			const Time newTime = BeatToTime(newBeat); // delay-aware effective time
+			// Position audio at effective time so GetCursorTime() stays consistent between paused and playing
 			SongVoice.SetPosition(newTime - Chart.SongOffset);
-			CursorNonSmoothTimeThisFrame = CursorNonSmoothTimeLastFrame = newTime;
+			// Set slightly before futureOffset (1/25s) so notes at cursor position trigger on first play frame
+			static constexpr f64 futureOffsetSec = 1.0 / 25.0;
+			CursorNonSmoothTimeThisFrame = CursorNonSmoothTimeLastFrame = Time::FromSec(newTime.Seconds - futureOffsetSec);
 			CursorBeatWhilePaused = newBeat;
 			CursorTimeOnPlaybackStart = newTime;
 		}

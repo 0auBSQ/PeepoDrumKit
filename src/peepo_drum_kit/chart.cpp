@@ -65,18 +65,7 @@ namespace PeepoDrumKit
 		}
 	}
 
-	struct TempTimedDelayCommand { Beat Beat; Time Delay; };
-
-	template <>
-	struct IsNonListChartEventTrait<TempTimedDelayCommand> : std::true_type { };
-
-	template <GenericMember Member, typename TempTimedDelayCommandT, expect_type_t<TempTimedDelayCommandT, TempTimedDelayCommand> = true>
-	constexpr decltype(auto) get(TempTimedDelayCommandT&& event)
-	{
-		if constexpr (Member == GenericMember::Beat_Start) return (std::forward<TempTimedDelayCommandT>(event).Beat);
-	}
-
-	static constexpr NoteType ConvertTJANoteType(TJA::NoteType tjaNoteType)
+static constexpr NoteType ConvertTJANoteType(TJA::NoteType tjaNoteType)
 	{
 		switch (tjaNoteType)
 		{
@@ -134,6 +123,7 @@ namespace PeepoDrumKit
 		for (const auto& v : course.ScrollChanges) maxBeat = Max(maxBeat, v.BeatTime);
 		for (const auto& v : course.BarLineChanges) maxBeat = Max(maxBeat, v.BeatTime);
 		for (const auto& v : course.Lyrics) maxBeat = Max(maxBeat, v.BeatTime);
+		for (const auto& v : course.DelayChanges) maxBeat = Max(maxBeat, v.BeatTime);
 		return maxBeat;
 	}
 
@@ -183,13 +173,9 @@ namespace PeepoDrumKit
 
 			i32 currentBalloonIndex = 0;
 
-			BeatSortedList<TempTimedDelayCommand> tempSortedDelayCommands;
-			BeatSortedForwardIterator<TempTimedDelayCommand> tempDelayCommandsIt;
 			for (const TJA::ConvertedMeasure& inMeasure : inCourse.Measures)
-			{
 				for (const TJA::ConvertedDelayChange& inDelayChange : inMeasure.DelayChanges)
-					tempSortedDelayCommands.InsertOrUpdate(TempTimedDelayCommand { inMeasure.StartTime + inDelayChange.TimeWithinMeasure, inDelayChange.Delay });
-			}
+					outCourse.DelayChanges.Sorted.push_back(DelayChange { inMeasure.StartTime + inDelayChange.TimeWithinMeasure, inDelayChange.Delay });
 
 			for (const TJA::ConvertedMeasure& inMeasure : inCourse.Measures)
 			{
@@ -210,9 +196,6 @@ namespace PeepoDrumKit
 					Note& outNote = outCourse.Notes_Normal.Sorted.emplace_back();
 					outNote.BeatTime = (inMeasure.StartTime + inNote.TimeWithinMeasure);
 					outNote.Type = outNoteType;
-
-					const TempTimedDelayCommand* delayCommandForThisNote = tempDelayCommandsIt.Next(tempSortedDelayCommands.Sorted, outNote.BeatTime);
-					outNote.TimeOffset = (delayCommandForThisNote != nullptr) ? delayCommandForThisNote->Delay : Time::Zero();
 
 					if (inNote.Type == TJA::NoteType::Start_Balloon || inNote.Type == TJA::NoteType::Start_BaloonSpecial || inNote.Type == TJA::NoteType::Fuse)
 					{
@@ -264,7 +247,10 @@ namespace PeepoDrumKit
 			outCourse.RecalculateSENotes();
 
 			if (!inCourse.Measures.empty())
-				out.ChartDuration = Max(out.ChartDuration, outCourse.TempoMap.BeatToTime(inCourse.Measures.back().StartTime /*+ inCourse.Measures.back().TimeSignature.GetDurationPerBar()*/));
+			{
+				const Beat lastBeat = inCourse.Measures.back().StartTime + inCourse.Measures.back().TimeSignature.GetDurationPerBar();
+				out.ChartDuration = Max(out.ChartDuration, Time::FromSec(outCourse.TempoMap.BeatToTime(lastBeat).Seconds + GetDelayAtBeat(outCourse.DelayChanges, lastBeat).Seconds));
+			}
 		}
 
 		return true;
@@ -329,7 +315,7 @@ namespace PeepoDrumKit
 			outCourse.Metadata.Others = inCourse.OtherMetadata;
 
 			// TODO: Is this implemented correctly..? Need to have enough measures to cover every note/command and pad with empty measures up to the chart duration
-			// BUG: NOPE! "07 ƒQ[ƒ€ƒ~ƒ…[ƒWƒbƒN/003D. MagiCatz/MagiCatz.tja" for example still gets rounded up and then increased by a measure each time it gets saved
+			// BUG: NOPE! "07 ï¿½Qï¿½[ï¿½ï¿½ï¿½~ï¿½ï¿½ï¿½[ï¿½Wï¿½bï¿½N/003D. MagiCatz/MagiCatz.tja" for example still gets rounded up and then increased by a measure each time it gets saved
 			// ... and even so does "Heat Haze Shadow 2.tja" without any weird time signatures..??
 			const Beat inChartMaxUsedBeat = FindCourseMaxUsedBeat(inCourse);
 			const Beat inChartBeatDuration = inCourse.TempoMap.TimeToBeat(in.GetDurationOrDefault());
@@ -373,7 +359,6 @@ namespace PeepoDrumKit
 				}
 			}
 
-			Time lastNoteTimeOffset = Time::Zero();
 			for (const Note& inNote : inCourse.Notes_Normal)
 			{
 				TJA::ConvertedMeasure* outConvertedMeasure = tryFindMeasureForBeat(outConvertedMeasures, inNote.BeatTime);
@@ -386,13 +371,13 @@ namespace PeepoDrumKit
 					if (assert(outConvertedMeasure != nullptr); outConvertedMeasure != nullptr)
 						outConvertedMeasure->Notes.push_back(TJA::ConvertedNote { ((inNote.BeatTime + inNote.BeatDuration) - outConvertedMeasure->StartTime), TJA::NoteType::End_BalloonOrDrumroll });
 				}
+			}
 
-				const Time thisNoteTimeOffset = ApproxmiatelySame(inNote.TimeOffset.Seconds, 0.0) ? Time::Zero() : inNote.TimeOffset;
-				if (thisNoteTimeOffset != lastNoteTimeOffset)
-				{
-					outConvertedMeasure->DelayChanges.push_back(TJA::ConvertedDelayChange { (inNote.BeatTime - outConvertedMeasure->StartTime), thisNoteTimeOffset });
-					lastNoteTimeOffset = thisNoteTimeOffset;
-				}
+			for (const DelayChange& delayChange : inCourse.DelayChanges)
+			{
+				TJA::ConvertedMeasure* outConvertedMeasure = tryFindMeasureForBeat(outConvertedMeasures, delayChange.BeatTime);
+				if (assert(outConvertedMeasure != nullptr); outConvertedMeasure != nullptr)
+					outConvertedMeasure->DelayChanges.push_back(TJA::ConvertedDelayChange { (delayChange.BeatTime - outConvertedMeasure->StartTime), delayChange.Delay });
 			}
 
 			for (const ScrollChange& inScroll : inCourse.ScrollChanges)

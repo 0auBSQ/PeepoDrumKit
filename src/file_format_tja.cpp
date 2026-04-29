@@ -322,12 +322,30 @@ namespace TJA
 
 			const std::string_view inNum = ASCII::Trim(in.substr(0, splitIndex));
 			const std::string_view inDen = ASCII::Trim(in.substr(splitIndex + 1));
-			if (i32 outNum, outDen; ASCII::TryParse(inNum, outNum) && ASCII::TryParse(inDen, outDen)) {
-				*out = TimeSignature(outNum, outDen);
-				return true;
-			} else {
+
+			f32 numF, denF;
+			if (!ASCII::TryParse(inNum, numF) || !ASCII::TryParse(inDen, denF))
 				return false;
+
+			// Find smallest integer scale factor to represent both values as exact integers.
+			// Handles common TJA fractional time signatures like 3.5/4 (-> 7/8) or 1.5/4 (-> 3/8).
+			i32 scale = 1;
+			for (i32 s : {1, 2, 4, 8, 10, 16, 100, 1000})
+			{
+				if (fabsf(numF * s - roundf(numF * s)) < 1e-4f && fabsf(denF * s - roundf(denF * s)) < 1e-4f)
+				{
+					scale = s;
+					break;
+				}
 			}
+
+			const i32 outNum = static_cast<i32>(roundf(numF * scale));
+			const i32 outDen = static_cast<i32>(roundf(denF * scale));
+			if (outDen == 0)
+				return false;
+
+			*out = TimeSignature(outNum, outDen);
+			return true;
 		};
 		static constexpr auto tryParseNoteTypeChar = [](char in, NoteType* out) -> b8
 		{

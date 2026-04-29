@@ -321,6 +321,10 @@ namespace PeepoDrumKit
 		using RemoveJPOSScroll = RemoveSingleChartEvent<JPOSScrollChange>;
 		using UpdateJPOSScroll = UpdateSingleChartEvent<JPOSScrollChange>;
 
+		using AddDelayChange = AddSingleChartEvent<DelayChange>;
+		using RemoveDelayChange = RemoveSingleChartEvent<DelayChange>;
+		using UpdateDelayChange = UpdateSingleChartEvent<DelayChange>;
+
 		using AddScrollType = AddSingleChartEvent<ScrollType>;
 		using RemoveScrollType = RemoveSingleChartEvent<ScrollType>;
 		using UpdateScrollType = UpdateSingleChartEvent<ScrollType>;

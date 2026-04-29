@@ -182,6 +182,7 @@ X("EVENT_GO_GO_TIME",								"Go-Go Time") \
 X("EVENT_LYRICS",									"Lyrics") \
 X("EVENT_SCROLL_TYPE",								"Scroll Type") \
 X("EVENT_JPOS_SCROLL",								"JPOS Scroll") \
+X("EVENT_DELAY",									"Delay") \
 X("EVENT_PROP_JPOS_SCROLL_MOVE",					"JPOS Scroll Move") \
 X("EVENT_PROP_VERTICAL_JPOS_SCROLL_MOVE",			"Vertical JPOS Scroll Move") \
 X("EVENT_PROP_JPOS_SCROLL_DURATION",				"JPOS Scroll Duration") \

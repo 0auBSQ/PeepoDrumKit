@@ -416,9 +416,9 @@ namespace PeepoDrumKit
 		for (const Note& note : course.GetNotes(branch))
 		{
 			const Beat beat = note.BeatTime;
-			const Time head = (course.TempoMap.BeatToTime(beat) + note.TimeOffset);
+			const Time head = (course.TempoMap.BeatToTime(beat) + GetDelayAtBeat(course.DelayChanges, beat) + note.TimeOffset);
 			const Beat beatTail = (note.BeatDuration > Beat::Zero()) ? (beat + note.BeatDuration) : beat;
-			const Time tail = (note.BeatDuration > Beat::Zero()) ? (course.TempoMap.BeatToTime(beatTail) + note.TimeOffset) : head;
+			const Time tail = (note.BeatDuration > Beat::Zero()) ? (course.TempoMap.BeatToTime(beatTail) + GetDelayAtBeat(course.DelayChanges, beatTail) + note.TimeOffset) : head;
 			perNoteFunc(ForEachNoteLaneData { &note, beat, head,
 				TempoOrDefault(tempoChangeIt.Next(course.TempoMap.Tempo.Sorted, beat)),
 				ScrollOrDefault(scrollChangeIt.Next(course.ScrollChanges.Sorted, beat)),
@@ -629,7 +629,13 @@ namespace PeepoDrumKit
 			const Time cursorTimeOrAnimated = isPlayback ? exactCursorBeatAndTime.Time : animatedCursorTime;
 			const Beat cursorBeatOrAnimatedTrunc = isPlayback ? exactCursorBeatAndTime.Beat : course->TempoMap.TimeToBeat(animatedCursorTime, true);
 			const f64 cursorHBScrollBeatOrAnimated = course->TempoMap.BeatAndTimeToHBScrollBeatTick(cursorBeatOrAnimatedTrunc, cursorTimeOrAnimated);
-			const Beat chartBeatDuration = course->TempoMap.TimeToBeat(context.Chart.GetDurationOrDefault());
+			// ChartDuration is now delay-aware (effective time). Convert it back to a raw beat
+			// using EffectiveTimeToBeat so barlines extend to the correct chart end.
+			const Beat chartBeatDuration = [&]() {
+				Beat b = Beat::Zero();
+				EffectiveTimeToBeat(course->TempoMap, course->DelayChanges, context.Chart.GetDurationOrDefault(), b);
+				return b;
+			}();
 
 			const auto* lastGogo = gogoRanges.TryFindLastAtBeat(cursorBeatOrAnimatedTrunc);
 			const b8 isGogo = (lastGogo != nullptr && cursorBeatOrAnimatedTrunc < lastGogo->GetEnd());
@@ -762,7 +768,10 @@ namespace PeepoDrumKit
 				if (IsRegularNote(it.OriginalNote->Type)) {
 					if (timeSinceHeadHit >= Time::Zero())
 						laneHead = laneTail = hitCirclePosLane; // temporary value, override when drawn
-					if (timeSinceHeadHit > GetTotalGameNoteHitAnimationDuration(it.OriginalNote->Type))
+					// Use a generous window so stop-gimmick notes remain visible for the full
+					// stop duration (max BMS stop ≈ 0.89 s > animation duration ≈ 0.77 s).
+					static constexpr Time PreviewHitWindowDuration = Time::FromSec(1.5);
+					if (timeSinceHeadHit > Max(GetTotalGameNoteHitAnimationDuration(it.OriginalNote->Type), PreviewHitWindowDuration))
 						isVisible = false;
 				}
 				else if (IsBalloonNote(it.OriginalNote->Type)) {

@@ -345,6 +345,17 @@ namespace PeepoDrumKit
 	template <>
 	inline LyricChange FallbackEvent<LyricChange> = {};
 
+	struct DelayChange
+	{
+		Beat BeatTime;
+		Time Delay;
+		b8 IsSelected;
+	};
+	template <> constexpr std::string_view DisplayNameOfChartEvent<DelayChange> = "Delay Change";
+
+	template <>
+	constexpr DelayChange FallbackEvent<DelayChange> = { Beat::Zero(), Time::Zero() };
+
 	using SortedNotesList = BeatSortedList<Note>;
 	using SortedScrollChangesList = BeatSortedList<ScrollChange>;
 	using SortedBarLineChangesList = BeatSortedList<BarLineChange>;
@@ -352,6 +363,63 @@ namespace PeepoDrumKit
 	using SortedLyricsList = BeatSortedList<LyricChange>;
 	using SortedJPOSScrollChangesList = BeatSortedList<JPOSScrollChange>;
 	using SortedScrollTypesList = BeatSortedList<ScrollType>;
+	using SortedDelayChangesList = BeatSortedList<DelayChange>;
+
+	// DelayChange.Delay stores the delta added by this specific #DELAY command.
+	// These functions compute the accumulated total by summing all previous deltas.
+	inline Time GetDelayAtBeat(const SortedDelayChangesList& delayChanges, Beat beat)
+	{
+		Time accumulated = Time::Zero();
+		for (const DelayChange& dc : delayChanges.Sorted)
+		{
+			if (dc.BeatTime > beat) break;
+			accumulated.Seconds += dc.Delay.Seconds;
+		}
+		return accumulated;
+	}
+
+	// Returns the total accumulated delay strictly BEFORE the given beat (exclusive).
+	inline Time GetDelayBeforeBeat(const SortedDelayChangesList& delayChanges, Beat beat)
+	{
+		Time accumulated = Time::Zero();
+		for (const DelayChange& dc : delayChanges.Sorted)
+		{
+			if (dc.BeatTime >= beat) break;
+			accumulated.Seconds += dc.Delay.Seconds;
+		}
+		return accumulated;
+	}
+
+	// Converts an effective (delay-adjusted) time to a beat.
+	// Returns false if the time falls inside a dead zone (gap created by a delay increase).
+	// When in a dead zone, outBeat is set to the beat of that delay change boundary (so callers can clamp to it).
+	inline b8 EffectiveTimeToBeat(const SortedTempoMap& tempoMap, const SortedDelayChangesList& delayChanges, Time effectiveTime, Beat& outBeat)
+	{
+		Time prevAccumulated = Time::Zero();
+		Time accumulated = Time::Zero();
+		for (const DelayChange& dc : delayChanges.Sorted)
+		{
+			accumulated.Seconds += dc.Delay.Seconds;
+			const Time gapStart = Time::FromSec(tempoMap.BeatToTime(dc.BeatTime).Seconds + prevAccumulated.Seconds);
+			const Time gapEnd   = Time::FromSec(tempoMap.BeatToTime(dc.BeatTime).Seconds + accumulated.Seconds);
+
+			if (effectiveTime.Seconds < gapStart.Seconds)
+			{
+				outBeat = tempoMap.TimeToBeat(Time::FromSec(Max(0.0, effectiveTime.Seconds - prevAccumulated.Seconds)));
+				if (outBeat.Ticks < 0) outBeat = Beat::Zero(); // guard: i32 overflow in ultra-high-BPM sections
+				return true;
+			}
+			if (dc.Delay.Seconds > 0.0 && effectiveTime.Seconds < gapEnd.Seconds)
+			{
+				outBeat = dc.BeatTime;
+				return false;
+			}
+			prevAccumulated = accumulated;
+		}
+		outBeat = tempoMap.TimeToBeat(Time::FromSec(Max(0.0, effectiveTime.Seconds - prevAccumulated.Seconds)));
+		if (outBeat.Ticks < 0) outBeat = Beat::Zero(); // guard: i32 overflow in ultra-high-BPM sections
+		return true;
+	}
 
 	constexpr Tempo ScrollSpeedToTempo(f32 scrollSpeed, Tempo baseTempo) { return Tempo(scrollSpeed * baseTempo.BPM); }
 	constexpr f32 ScrollTempoToSpeed(Tempo scrollTempo, Tempo baseTempo) { return (baseTempo.BPM == 0.0f) ? 0.0f : (scrollTempo.BPM / baseTempo.BPM); }
@@ -385,6 +453,7 @@ namespace PeepoDrumKit
 
 		SortedScrollTypesList ScrollTypes;
 		SortedJPOSScrollChangesList JPOSScrollChanges;
+		SortedDelayChangesList DelayChanges;
 
 		i32 ScoreInit = 0;
 		i32 ScoreDiff = 0;
@@ -491,6 +560,7 @@ namespace PeepoDrumKit
 		Lyrics,
 		ScrollType,
 		JPOSScroll,
+		DelayChanges,
 		Count
 	};
 
@@ -538,7 +608,7 @@ namespace PeepoDrumKit
 	static_assert(GenericMemberFlags_All & (1u << (static_cast<u32>(GenericMember::Count) - 1)));
 	static_assert(!(GenericMemberFlags_All & (1u << static_cast<u32>(GenericMember::Count))));
 
-	constexpr cstr GenericListNames[] = { "TempoChanges", "SignatureChanges", "Notes_Normal", "Notes_Expert", "Notes_Master", "ScrollChanges", "BarLineChanges", "GoGoRanges", "Lyrics", "ScrollType", "JPOSScroll", };
+	constexpr cstr GenericListNames[] = { "TempoChanges", "SignatureChanges", "Notes_Normal", "Notes_Expert", "Notes_Master", "ScrollChanges", "BarLineChanges", "GoGoRanges", "Lyrics", "ScrollType", "JPOSScroll", "DelayChanges", };
 	constexpr cstr GenericMemberNames[] = { "IsSelected", "BarLineVisible", "BalloonPopCount", "ScrollSpeed", "Start", "Duration", "Offset", "NoteType", "Tempo", "TimeSignature", "Lyric", "ScrollType", "JPOSScroll", "JPOSScrollDuration", };
 
 	// Member availability queries
@@ -723,6 +793,14 @@ namespace PeepoDrumKit
 		else if constexpr (Member == GenericMember::Beat_Start) return (std::forward<JPOSScrollChangeT>(event).BeatTime);
 	}
 
+	template <GenericMember Member, typename DelayChangeT, expect_type_t<DelayChangeT, DelayChange> = true>
+	constexpr decltype(auto) get(DelayChangeT&& event)
+	{
+		if constexpr (Member == GenericMember::B8_IsSelected) return (std::forward<DelayChangeT>(event).IsSelected);
+		else if constexpr (Member == GenericMember::Beat_Start) return (std::forward<DelayChangeT>(event).BeatTime);
+		else if constexpr (Member == GenericMember::Time_Offset) return (std::forward<DelayChangeT>(event).Delay);
+	}
+
 	// Member availability queries
 	template <typename T, auto Tag, typename = void>
 	struct has_get_t : std::false_type {};
@@ -893,6 +971,7 @@ namespace PeepoDrumKit
 			GoGoRange GoGo;
 			ScrollType ScrollType;
 			JPOSScrollChange JPOSScroll;
+			DelayChange Delay;
 
 			inline PODData() { ::memset(this, 0, sizeof(*this)); }
 		} POD;
@@ -955,6 +1034,7 @@ namespace PeepoDrumKit
 		else if constexpr (List == GenericList::Lyrics) return (std::forward<ChartCourseT>(course).Lyrics);
 		else if constexpr (List == GenericList::ScrollType) return (std::forward<ChartCourseT>(course).ScrollTypes);
 		else if constexpr (List == GenericList::JPOSScroll) return (std::forward<ChartCourseT>(course).JPOSScrollChanges);
+		else if constexpr (List == GenericList::DelayChanges) return (std::forward<ChartCourseT>(course).DelayChanges);
 		else static_assert(false, "unhandled or invalid GenericList value");
 	}
 
@@ -975,6 +1055,7 @@ namespace PeepoDrumKit
 		else if constexpr (List == GenericList::Lyrics) return (std::forward<GenericListStructT>(inValue).NonTrivial.Lyric);
 		else if constexpr (List == GenericList::ScrollType) return (std::forward<GenericListStructT>(inValue).POD.ScrollType);
 		else if constexpr (List == GenericList::JPOSScroll) return (std::forward<GenericListStructT>(inValue).POD.JPOSScroll);
+		else if constexpr (List == GenericList::DelayChanges) return (std::forward<GenericListStructT>(inValue).POD.Delay);
 		else static_assert(false, "unhandled or invalid GenericList value");
 	}
 
@@ -1051,6 +1132,7 @@ namespace PeepoDrumKit
 		X(GenericList::Lyrics)
 		X(GenericList::ScrollType)
 		X(GenericList::JPOSScroll)
+		X(GenericList::DelayChanges)
 #undef X
 		default: assert(false); return keep_or_static_cast<TRet>(vError);
 		}

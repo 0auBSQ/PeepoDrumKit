@@ -1146,7 +1146,7 @@ namespace PeepoDrumKit
 			{
 				if (Gui::Property::BeginTable(ImGuiTableFlags_BordersInner))
 				{
-					const cstr listTypeNames[] = { UI_Str("SELECTED_EVENTS_TEMPOS"), UI_Str("SELECTED_EVENTS_TIME_SIGNATURES"), UI_Str("EVENT_NOTES"), UI_Str("EVENT_NOTES"), UI_Str("EVENT_NOTES"), UI_Str("SELECTED_EVENTS_SCROLL_SPEEDS"), UI_Str("SELECTED_EVENTS_BAR_LINE_VISIBILITIES"), UI_Str("SELECTED_EVENTS_GO_GO_RANGES"), UI_Str("EVENT_LYRICS"), UI_Str("SELECTED_EVENTS_SCROLL_TYPES"), UI_Str("SELECTED_EVENTS_JPOS_SCROLLS"), };
+					const cstr listTypeNames[] = { UI_Str("SELECTED_EVENTS_TEMPOS"), UI_Str("SELECTED_EVENTS_TIME_SIGNATURES"), UI_Str("EVENT_NOTES"), UI_Str("EVENT_NOTES"), UI_Str("EVENT_NOTES"), UI_Str("SELECTED_EVENTS_SCROLL_SPEEDS"), UI_Str("SELECTED_EVENTS_BAR_LINE_VISIBILITIES"), UI_Str("SELECTED_EVENTS_GO_GO_RANGES"), UI_Str("EVENT_LYRICS"), UI_Str("SELECTED_EVENTS_SCROLL_TYPES"), UI_Str("SELECTED_EVENTS_JPOS_SCROLLS"), UI_Str("EVENT_DELAY"), };
 					static_assert(ArrayCount(listTypeNames) == EnumCount<GenericList>);
 
 					Gui::Property::Property([&]
@@ -1603,32 +1603,55 @@ namespace PeepoDrumKit
 						} break;
 						case GenericMember::Time_Offset:
 						{
+							const b8 isDelayEdit = (commonListType == GenericList::DelayChanges);
 							MultiEditWidgetParam widgetIn = {};
 							widgetIn.EnableStepButtons = true;
-							widgetIn.Value.F32 = sharedValues.TimeOffset().ToMS_F32();
 							widgetIn.HasMixedValues = !(commonEqualMemberFlags & EnumToFlag(member));
-							widgetIn.MixedValuesMin.F32 = mixedValuesMin.TimeOffset().ToMS_F32();
-							widgetIn.MixedValuesMax.F32 = mixedValuesMax.TimeOffset().ToMS_F32();
-							widgetIn.ButtonStep.F32 = 1.0f;
-							widgetIn.ButtonStepFast.F32 = 5.0f;
 							widgetIn.EnableDragLabel = true;
-							widgetIn.DragLabelSpeed = 1.0f;
-							widgetIn.FormatString = "%g ms";
-							const MultiEditWidgetResult widgetOut = GuiPropertyMultiSelectionEditWidget(UI_Str("EVENT_PROP_TIME_OFFSET"), widgetIn);
+							if (isDelayEdit)
+							{
+								widgetIn.Value.F32 = sharedValues.TimeOffset().ToSec_F32();
+								widgetIn.MixedValuesMin.F32 = mixedValuesMin.TimeOffset().ToSec_F32();
+								widgetIn.MixedValuesMax.F32 = mixedValuesMax.TimeOffset().ToSec_F32();
+								widgetIn.ButtonStep.F32 = 0.01f;
+								widgetIn.ButtonStepFast.F32 = 0.1f;
+								widgetIn.DragLabelSpeed = 0.01f;
+								widgetIn.FormatString = "%g sec";
+							}
+							else
+							{
+								widgetIn.Value.F32 = sharedValues.TimeOffset().ToMS_F32();
+								widgetIn.MixedValuesMin.F32 = mixedValuesMin.TimeOffset().ToMS_F32();
+								widgetIn.MixedValuesMax.F32 = mixedValuesMax.TimeOffset().ToMS_F32();
+								widgetIn.ButtonStep.F32 = 1.0f;
+								widgetIn.ButtonStepFast.F32 = 5.0f;
+								widgetIn.DragLabelSpeed = 1.0f;
+								widgetIn.FormatString = "%g ms";
+							}
+							const MultiEditWidgetResult widgetOut = GuiPropertyMultiSelectionEditWidget(isDelayEdit ? UI_Str("EVENT_DELAY") : UI_Str("EVENT_PROP_TIME_OFFSET"), widgetIn);
 							if (widgetOut.HasValueExact || widgetOut.HasValueIncrement)
 							{
 								if (widgetOut.HasValueExact)
 								{
-									const Time valueExact = Clamp(Time::FromMS(widgetOut.ValueExact.F32), MinNoteTimeOffset, MaxNoteTimeOffset);
+									const Time valueExact = isDelayEdit
+										? Time::FromSec(widgetOut.ValueExact.F32)
+										: Clamp(Time::FromMS(widgetOut.ValueExact.F32), MinNoteTimeOffset, MaxNoteTimeOffset);
 									for (auto& selectedItem : SelectedItems)
 										selectedItem.MemberValues.TimeOffset() = valueExact;
 									valueWasChanged = true;
 								}
 								else if (widgetOut.HasValueIncrement)
 								{
-									const Time valueIncrement = Time::FromMS(widgetOut.ValueIncrement.F32);
+									const Time valueIncrement = isDelayEdit
+										? Time::FromSec(widgetOut.ValueIncrement.F32)
+										: Time::FromMS(widgetOut.ValueIncrement.F32);
 									for (auto& selectedItem : SelectedItems)
-										selectedItem.MemberValues.TimeOffset() = Clamp(selectedItem.MemberValues.TimeOffset() + valueIncrement, MinNoteTimeOffset, MaxNoteTimeOffset);
+									{
+										Time newValue = selectedItem.MemberValues.TimeOffset() + valueIncrement;
+										if (!isDelayEdit)
+											newValue = Clamp(newValue, MinNoteTimeOffset, MaxNoteTimeOffset);
+										selectedItem.MemberValues.TimeOffset() = newValue;
+									}
 									valueWasChanged = true;
 								}
 
@@ -2640,6 +2663,47 @@ namespace PeepoDrumKit
 						Gui::PopID();
 					});
 
+					const DelayChange* delayChangeAtCursor = course.DelayChanges.TryFindLastAtBeat(cursorBeat);
+					// Show the delta of the change exactly at cursor, or 0 if none (so the user edits this specific change's delta)
+					const Time delayAtCursor = (delayChangeAtCursor != nullptr && delayChangeAtCursor->BeatTime == cursorBeat) ? delayChangeAtCursor->Delay : FallbackEvent<DelayChange>.Delay;
+					auto insertOrUpdateCursorDelayChange = [&](Time newDelay)
+					{
+						if (delayChangeAtCursor == nullptr || delayChangeAtCursor->BeatTime != cursorBeat)
+							context.Undo.Execute<Commands::AddDelayChange>(&course, &course.DelayChanges, DelayChange{ cursorBeat, newDelay });
+						else
+							context.Undo.Execute<Commands::UpdateDelayChange>(&course, &course.DelayChanges, DelayChange{ cursorBeat, newDelay });
+					};
+
+					Gui::Property::PropertyTextValueFunc(UI_Str("EVENT_DELAY"), [&]
+					{
+						Gui::BeginDisabled(disableEditingAtPlayCursor);
+
+						Gui::PushID(&course.DelayChanges);
+						f32 delaySec = delayAtCursor.ToSec_F32();
+						Gui::SetNextItemWidth(-1.0f);
+						if (Gui::SpinFloat("##DelayAtCursor", &delaySec, 0.01f, 0.1f, "%g sec"))
+							insertOrUpdateCursorDelayChange(Time::FromSec(delaySec));
+
+						if (!disallowRemoveButton && delayChangeAtCursor != nullptr && delayChangeAtCursor->BeatTime == cursorBeat)
+						{
+							if (Gui::Button(UI_Str("ACT_EVENT_REMOVE"), { getInsertButtonWidth(), 0.0f }))
+								context.Undo.Execute<Commands::RemoveDelayChange>(&course, &course.DelayChanges, cursorBeat);
+						}
+						else
+						{
+							if (Gui::Button(UI_Str("ACT_EVENT_ADD"), { getInsertButtonWidth(), 0.0f }))
+								insertOrUpdateCursorDelayChange(delayAtCursor);
+						}
+
+						Gui::SameLine(0, Gui::GetStyle().ItemInnerSpacing.x);
+						Gui::BeginDisabled(!isAnyItemNotInListSelected[EnumToIndex(GenericList::DelayChanges)]);
+						if (SpriteButton(UI_Str("ACT_EVENT_INSERT_AT_SELECTED_ITEMS"), context, SprID::Timeline_Icon_InsertAtSelectedItems, { Gui::GetFrameHeight(), Gui::GetFrameHeight() }))
+							timeline.ExecuteConvertSelectionToEvents<GenericList::DelayChanges>(context);
+						Gui::EndDisabled();
+
+						Gui::PopID();
+						Gui::EndDisabled();
+					});
 
 				Gui::Property::PropertyTextValueFunc(UI_Str("EVENT_GO_GO_TIME"), [&]
 				{
