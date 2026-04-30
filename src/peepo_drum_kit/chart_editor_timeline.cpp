@@ -70,6 +70,12 @@ namespace PeepoDrumKit
 				{ "Timeline JPosScroll Background Outer", &TimelineJPOSScrollBackgroundColorOuter },
 				{ "Timeline JPosScroll Background Inner", &TimelineJPOSScrollBackgroundColorInner },
 				NamedColorU32Pointer {},
+				{ "Timeline Branch Section Background Border", &TimelineBranchSectionBackgroundColorBorder },
+				{ "Timeline Branch Section Background Border (Selected)", &TimelineBranchSectionBackgroundColorBorderSelected },
+				{ "Timeline Branch Section Background Outer", &TimelineBranchSectionBackgroundColorOuter },
+				{ "Timeline Branch Section Background Inner", &TimelineBranchSectionBackgroundColorInner },
+				{ "Timeline Section Marker Line", &TimelineSectionMarkerLineColor },
+				NamedColorU32Pointer {},
 				{ "Timeline Horizontal Row Line", &TimelineHorizontalRowLineColor },
 				{ "Grid Bar Line", &TimelineGridBarLineColor },
 				{ "Grid Beat Line", &TimelineGridBeatLineColor },
@@ -248,10 +254,10 @@ namespace PeepoDrumKit
 		f32 localY = 0.0f;
 		for (TimelineRowType rowType = {}; rowType < TimelineRowType::Count; IncrementEnum(rowType))
 		{
-			// HACK: Draw the non default branches smaller for now to waste less space (might wanna rethink all of this...)
+				// All branch rows get the full notes height when the course has branches; Normal-only height otherwise
 			const b8 isNotesRow =
 				(rowType >= TimelineRowType::NoteBranches_First && rowType <= TimelineRowType::NoteBranches_Last) &&
-				(TimelineRowToBranchType(rowType) == BranchType::Normal);
+				(timeline.SelectedCourseHasBranches || TimelineRowToBranchType(rowType) == BranchType::Normal);
 
 			const f32 localHeight = GuiScale(isNotesRow ? TimelineRowHeightNotes : TimelineRowHeight);
 
@@ -535,6 +541,11 @@ namespace PeepoDrumKit
 		DrawTimelineRectBaseWithStartEndTriangles(drawList, DrawTimelineRectBaseParam{ tl, br, 1.0f, 1.0f, selected ? TimelineJPOSScrollBackgroundColorBorderSelected : TimelineJPOSScrollBackgroundColorBorder, TimelineJPOSScrollBackgroundColorOuter, TimelineJPOSScrollBackgroundColorInner, selected });
 	}
 
+	static void DrawTimelineBranchSectionBackground(ImDrawList* drawList, vec2 tl, vec2 br, b8 selected)
+	{
+		DrawTimelineRectBaseWithStartEndTriangles(drawList, DrawTimelineRectBaseParam{ tl, br, 1.0f, 1.0f, selected ? TimelineBranchSectionBackgroundColorBorderSelected : TimelineBranchSectionBackgroundColorBorder, TimelineBranchSectionBackgroundColorOuter, TimelineBranchSectionBackgroundColorInner, selected });
+	}
+
 	static void DrawTimelineContentWaveform(const ChartTimeline& timeline, ImDrawList* drawList, Time chartSongOffset, const Audio::WaveformMipChain& waveformL, const Audio::WaveformMipChain& waveformR, f32 waveformAnimation)
 	{
 		const f32 waveformAnimationScale = Clamp(waveformAnimation, 0.0f, 1.0f);
@@ -700,6 +711,117 @@ namespace PeepoDrumKit
 				const vec2 localBR = vec2(camera.TimeToLocalSpaceX(endTime), 0.0f) + vec2(0.0f, rowIt.LocalY + rowIt.LocalHeight - (margin * 2.0f));
 				DrawTimelineGoGoTimeBackground(drawListContent, timeline.LocalToScreenSpace(localTL) + vec2(0.0f, 2.0f), timeline.LocalToScreenSpace(localBR), it.ExpansionAnimationCurrent, it.IsSelected);
 			}
+		}
+		else if constexpr (std::is_same_v<T, BranchSection>)
+		{
+			Gui::PushFont(FontMain, GuiScaleI32_AtTarget(FontBaseSizes::Small));
+			static constexpr u32 BranchBarText = IM_COL32(255, 245, 210, 230);
+
+			char condBuf[40];
+			i32 rightClickedIdx = -1;
+			for (i32 bsi = 0; bsi < (i32)list.size(); bsi++)
+			{
+				const BranchSection& it = list[bsi];
+				const Time startTime = context.BeatToTime(it.GetStart());
+				const Time endTime   = context.BeatToTime(it.GetEnd());
+				if (endTime < visibleTime.Min || startTime > visibleTime.Max)
+					continue;
+
+				static constexpr f32 margin = 1.0f;
+				const vec2 localTL = vec2(camera.TimeToLocalSpaceX(startTime), rowIt.LocalY + margin);
+				const vec2 localBR = vec2(camera.TimeToLocalSpaceX(endTime),   rowIt.LocalY + rowIt.LocalHeight - margin * 2.0f);
+				const vec2 screenTL = timeline.LocalToScreenSpace(localTL);
+				const vec2 screenBR = timeline.LocalToScreenSpace(localBR);
+
+				DrawTimelineBranchSectionBackground(drawListContent, screenTL + vec2(0.0f, 2.0f), screenBR, it.IsSelected);
+
+				// Condition label
+				const f32 barWidth = screenBR.x - screenTL.x;
+				if (barWidth > GuiScale(30.0f))
+				{
+					sprintf_s(condBuf, "%c,%d,%d", TJA::BranchConditionToChar(it.Condition), it.RequirementExpert, it.RequirementMaster);
+					const vec2 textPos = screenTL + GuiScale(vec2(3.0f, 2.0f));
+					const ImVec4 clip = { screenTL.x + GuiScale(2.0f), screenTL.y, screenBR.x - GuiScale(2.0f), screenBR.y };
+					Gui::AddTextWithDropShadow(drawListContent, nullptr, 0.0f, textPos, BranchBarText, condBuf, 0.0f, &clip, IM_COL32(0, 0, 0, 120));
+				}
+
+				// Right-click to open section-specific context menu
+				if (timeline.IsContentWindowHovered && Gui::IsMouseHoveringRect(screenTL, screenBR, false) && Gui::IsMouseClicked(ImGuiMouseButton_Right))
+					rightClickedIdx = bsi;
+			}
+
+			// Right-click anywhere on row (not on existing section) → add
+			{
+				const vec2 rowScreenTL = timeline.LocalToScreenSpace(vec2(0.0f, rowIt.LocalY));
+				const vec2 rowScreenBR = timeline.LocalToScreenSpace(vec2(timeline.Regions.Content.GetWidth(), rowIt.LocalY + rowIt.LocalHeight));
+				if (timeline.IsContentWindowHovered && Gui::IsMouseHoveringRect(rowScreenTL, rowScreenBR, false) && Gui::IsMouseClicked(ImGuiMouseButton_Right))
+				{
+					if (rightClickedIdx < 0)
+						Gui::OpenPopup("BranchSec_Add");
+					else
+						Gui::OpenPopup("BranchSec_Edit");
+				}
+			}
+
+			// "Add" popup
+			if (Gui::BeginPopup("BranchSec_Add"))
+			{
+				const Time mouseTime = camera.LocalSpaceXToTime(timeline.ScreenToLocalSpace(Gui::GetMousePosOnOpeningCurrentPopup()).x);
+				const Beat startBeat = timeline.RoundBeatToCurrentGrid(context.TimeToBeat(mouseTime));
+				const Beat defDuration = Beat::FromBars(2);
+				if (Gui::MenuItem("Add Branch Section Here"))
+				{
+					BranchSection newSec; newSec.BeatTime = startBeat; newSec.BeatDuration = defDuration;
+					context.Undo.Execute<Commands::AddSingleChartEvent<BranchSection>>(context.ChartSelectedCourse, &context.ChartSelectedCourse->BranchSections, newSec);
+					context.ChartSelectedCourse->HasBranches(); // triggers rebuild of SelectedCourseHasBranches next frame
+				}
+				Gui::EndPopup();
+			}
+
+			// "Edit/Delete" popup for clicked section
+			if (rightClickedIdx >= 0 && rightClickedIdx < (i32)list.size())
+			{
+				BranchSection& editSec = context.ChartSelectedCourse->BranchSections[rightClickedIdx];
+				if (Gui::BeginPopup("BranchSec_Edit"))
+				{
+					Gui::TextUnformatted("Branch Section");
+					Gui::Separator();
+					static const char* condNames[] = { "Roll (r)", "Precise (p)", "Score (s)" };
+					int condIdx = static_cast<int>(editSec.Condition);
+					if (Gui::Combo("Type", &condIdx, condNames, 3))
+					{ context.Undo.NotifyChangesWereMade(); editSec.Condition = static_cast<TJA::BranchCondition>(condIdx); }
+					int reqE = editSec.RequirementExpert, reqM = editSec.RequirementMaster;
+					if (Gui::InputInt("Expert Req.", &reqE)) { context.Undo.NotifyChangesWereMade(); editSec.RequirementExpert = reqE; }
+					if (Gui::InputInt("Master Req.", &reqM)) { context.Undo.NotifyChangesWereMade(); editSec.RequirementMaster = reqM; }
+					Gui::Separator();
+					if (Gui::MenuItem("Delete Section"))
+						context.Undo.Execute<Commands::RemoveSingleChartEvent<BranchSection>>(context.ChartSelectedCourse, &context.ChartSelectedCourse->BranchSections, editSec);
+					Gui::TextDisabled("(changes to condition persist on Save, no undo)");
+					Gui::EndPopup();
+				}
+			}
+			Gui::PopFont();
+		}
+		else if constexpr (std::is_same_v<T, SectionMarker>)
+		{
+			Gui::PushFont(FontMain, GuiScaleI32_AtTarget(FontBaseSizes::Small));
+			for (i32 smi = 0; smi < (i32)list.size(); smi++)
+			{
+				const SectionMarker& it = list[smi];
+				const Time time = context.BeatToTime(it.BeatTime);
+				if (time < visibleTime.Min || time > visibleTime.Max)
+					continue;
+
+				const vec2 localSpaceTL = vec2(camera.TimeToLocalSpaceX(time), rowIt.LocalY);
+				const vec2 localSpaceBL = vec2(localSpaceTL.x, rowIt.LocalY + rowIt.LocalHeight);
+				const u32 lineCol = it.IsSelected ? TimelineSelectedItemLineColor : TimelineSectionMarkerLineColor;
+				drawListContent->AddLine(timeline.LocalToScreenSpace(localSpaceTL + vec2(0.0f, 1.0f)), timeline.LocalToScreenSpace(localSpaceBL), lineCol, GuiScale(2.0f));
+
+				const vec2 textPos = timeline.LocalToScreenSpace(localSpaceTL + vec2(2.0f, 1.0f));
+				const ImVec4 clip = { textPos.x, textPos.y, textPos.x + GuiScale(32.0f), textPos.y + rowIt.LocalHeight };
+				Gui::AddTextWithDropShadow(drawListContent, nullptr, 0.0f, textPos, lineCol, "#SECTION", 0.0f, &clip, IM_COL32(0, 0, 0, 120));
+			}
+			Gui::PopFont();
 		}
 		else if constexpr (std::is_same_v<T, LyricChange>)
 		{
@@ -940,7 +1062,7 @@ namespace PeepoDrumKit
 			i32 iLane = -1;
 			for (auto it = cbegin(context.Chart.Courses); it != cend(context.Chart.Courses); ++it) {
 				const auto* course = it->get();
-				auto branch = BranchType::Normal;
+				const BranchType branch = (course == context.ChartSelectedCourse) ? context.ChartSelectedBranch : BranchType::Normal;
 				if (!context.IsChartCompared(course, branch))
 					continue;
 				const b8 isFocusedLane = (context.CompareMode && course == context.ChartSelectedCourse && branch == context.ChartSelectedBranch);
@@ -2333,7 +2455,7 @@ namespace PeepoDrumKit
 				{
 					ForEachTimelineRow(*this, [&](const ForEachRowData& rowIt)
 					{
-						const GenericList list = TimelineRowToGenericList(rowIt.RowType);
+						const GenericList list = GetEffectiveGenericList(rowIt.RowType, context.ChartSelectedBranch);
 						const b8 isNotesRow = IsNotesList(list);
 
 						const Rect screenRowRect = Rect(LocalToScreenSpace(vec2(0.0f, rowIt.LocalY)), LocalToScreenSpace(vec2(Regions.Content.GetWidth(), rowIt.LocalY + rowIt.LocalHeight)));
@@ -3045,13 +3167,13 @@ namespace PeepoDrumKit
 
 						ForEachTimelineRow(*this, [&](const ForEachRowData& rowIt)
 						{
-							const GenericList list = TimelineRowToGenericList(rowIt.RowType);
+							const GenericList list = GetEffectiveGenericList(rowIt.RowType, context.ChartSelectedBranch);
 							const b8 isNotesRow = IsNotesList(list);
 
 							enum class XIntersectionTest : u8 { Tips, Full };
 							enum class YIntersectionTest : u8 { Center, FullRow };
 							const XIntersectionTest xIntersectionTest = IsNotesList(list) ? XIntersectionTest::Tips : XIntersectionTest::Full;
-							const YIntersectionTest yIntersectionTest = (list == GenericList::GoGoRanges || list == GenericList::Lyrics || list == GenericList::JPOSScroll) ?
+							const YIntersectionTest yIntersectionTest = (list == GenericList::GoGoRanges || list == GenericList::Lyrics || list == GenericList::JPOSScroll || list == GenericList::JPOSScroll_Expert || list == GenericList::JPOSScroll_Master || list == GenericList::BranchSections) ?
 								YIntersectionTest::FullRow
 								: YIntersectionTest::Center;
 
@@ -3166,6 +3288,9 @@ namespace PeepoDrumKit
 
 	void ChartTimeline::DrawAllAtEndOfFrame(ChartContext& context)
 	{
+		// Cache per-frame flags used by ForEachTimelineRow and branch overlays
+		SelectedCourseHasBranches = (context.ChartSelectedCourse != nullptr && context.ChartSelectedCourse->HasBranches());
+
 		if (!context.Gfx.IsAsyncLoading())
 			context.Gfx.Rasterize(SprGroup::Timeline, GuiScaleFactorTarget);
 
@@ -3215,6 +3340,7 @@ namespace PeepoDrumKit
 				DrawListContentHeader->AddTriangle(triangle[0], triangle[1], triangle[2], TimelineSongDemoStartMarkerColorBorder);
 			}
 		}
+
 
 		// NOTE: Tempo map bar/beat lines and bar-index/time text
 		{
@@ -3332,6 +3458,35 @@ namespace PeepoDrumKit
 		if (TimelineWaveformDrawOrder == WaveformDrawOrder::Background && !context.SongWaveformL.IsEmpty())
 			DrawTimelineContentWaveform(*this, DrawListContent, context.Chart.SongOffset, context.SongWaveformL, context.SongWaveformR, context.SongWaveformFadeAnimationCurrent);
 
+		// NOTE: Branch section background overlays on note rows (thin tint only; main visual is in the BranchSections row)
+		if (SelectedCourseHasBranches)
+		{
+			// Collect note row Y span
+			f32 noteRowsStartY = 0.0f, noteRowsEndY = 0.0f;
+			ForEachTimelineRow(*this, [&](const ForEachRowData& rowIt)
+			{
+				if (rowIt.RowType == TimelineRowType::Notes_Normal)
+					noteRowsStartY = rowIt.LocalY;
+				if (rowIt.RowType == TimelineRowType::Notes_Master)
+					noteRowsEndY = rowIt.LocalY + rowIt.LocalHeight;
+			});
+
+			for (const BranchSection& bs : context.ChartSelectedCourse->BranchSections)
+			{
+				const Time t0 = context.BeatToTime(bs.BeatTime);
+				const Time t1 = context.BeatToTime(bs.GetEnd());
+				const f32 x0 = Camera.TimeToLocalSpaceX(t0);
+				const f32 x1 = Camera.TimeToLocalSpaceX(t1);
+				if (x0 > Regions.Content.GetWidth() || x1 < 0.0f) continue;
+
+				// Very light tint across all note rows
+				DrawListContent->AddRectFilled(
+					LocalToScreenSpace(vec2(x0, noteRowsStartY)),
+					LocalToScreenSpace(vec2(x1, noteRowsEndY)),
+					IM_COL32(200, 190, 80, 12));
+			}
+		}
+
 		// NOTE: Row labels, lines and items
 		{
 			const Time visibleTimeOverdraw = Camera.TimePerScreenPixel() * (Gui::GetFrameHeight() * 4.0f);
@@ -3352,11 +3507,35 @@ namespace PeepoDrumKit
 					const f32 textHeight = Gui::GetFontSize();
 					const vec2 screenSpaceTextPosition = sidebarScreenSpaceTL + vec2((Gui::GetStyle().FramePadding.x * 2.0f), Floor((rowIt.LocalHeight * 0.5f) - (textHeight * 0.5f)));
 
-					// HACK: Use TextDisable for now to make it clear that these aren't really implemented yet
-					const b8 isThisRowImplemented = !(rowIt.RowType == TimelineRowType::Notes_Expert || rowIt.RowType == TimelineRowType::Notes_Master);
+					const BranchType rowBranchType = TimelineRowToBranchType(rowIt.RowType);
+					const b8 isBranchRow = (rowBranchType < BranchType::Count);
+					const b8 isActiveBranch = isBranchRow && SelectedCourseHasBranches && (rowBranchType == context.ChartSelectedBranch);
+
+					// Colored left border for the active branch
+					if (isActiveBranch)
+					{
+						static constexpr u32 branchActiveColors[3] = { IM_COL32(100, 180, 255, 220), IM_COL32(255, 210, 70, 220), IM_COL32(255, 110, 110, 220) };
+						DrawListSidebar->AddRectFilled(
+							sidebarScreenSpaceTL,
+							sidebarScreenSpaceTL + vec2(GuiScale(3.0f), rowIt.LocalHeight),
+							branchActiveColors[EnumToIndex(rowBranchType)]);
+					}
+
+					// Branch row label color: N=blue, E=yellow, M=red; active = brighter
+					u32 labelColor;
+					if (isBranchRow && SelectedCourseHasBranches)
+					{
+						static constexpr u32 branchColors[3]       = { IM_COL32(130, 190, 255, 200), IM_COL32(245, 205, 75, 200), IM_COL32(255, 120, 120, 200) };
+						static constexpr u32 branchColorsActive[3] = { IM_COL32(160, 210, 255, 255), IM_COL32(255, 225, 100, 255), IM_COL32(255, 150, 150, 255) };
+						labelColor = isActiveBranch ? branchColorsActive[EnumToIndex(rowBranchType)] : branchColors[EnumToIndex(rowBranchType)];
+					}
+					else
+					{
+						labelColor = Gui::GetColorU32(ImGuiCol_Text);
+					}
 
 					Gui::DisableFontPixelSnap(true);
-					DrawListSidebar->AddText(screenSpaceTextPosition, Gui::GetColorU32(isThisRowImplemented ? ImGuiCol_Text : ImGuiCol_TextDisabled), Gui::StringViewStart(rowIt.Label), Gui::StringViewEnd(rowIt.Label));
+					DrawListSidebar->AddText(screenSpaceTextPosition, labelColor, Gui::StringViewStart(rowIt.Label), Gui::StringViewEnd(rowIt.Label));
 					Gui::DisableFontPixelSnap(false);
 				}
 
@@ -3374,12 +3553,14 @@ namespace PeepoDrumKit
 				case TimelineRowType::Notes_Normal: DrawTimelineContentItemRowT<Note, TimelineRowType::Notes_Normal>(rowParam, rowIt, context.ChartSelectedCourse->Notes_Normal); break;
 				case TimelineRowType::Notes_Expert: DrawTimelineContentItemRowT<Note, TimelineRowType::Notes_Expert>(rowParam, rowIt, context.ChartSelectedCourse->Notes_Expert); break;
 				case TimelineRowType::Notes_Master: DrawTimelineContentItemRowT<Note, TimelineRowType::Notes_Master>(rowParam, rowIt, context.ChartSelectedCourse->Notes_Master); break;
-				case TimelineRowType::ScrollSpeed: DrawTimelineContentItemRowT<ScrollChange, TimelineRowType::ScrollSpeed>(rowParam, rowIt, context.ChartSelectedCourse->ScrollChanges); break;
+				case TimelineRowType::ScrollSpeed: DrawTimelineContentItemRowT<ScrollChange, TimelineRowType::ScrollSpeed>(rowParam, rowIt, context.ChartSelectedCourse->GetScrollChanges(context.ChartSelectedBranch)); break;
 				case TimelineRowType::BarLineVisibility: DrawTimelineContentItemRowT<BarLineChange, TimelineRowType::BarLineVisibility>(rowParam, rowIt, context.ChartSelectedCourse->BarLineChanges); break;
 				case TimelineRowType::GoGoTime: DrawTimelineContentItemRowT<GoGoRange, TimelineRowType::GoGoTime>(rowParam, rowIt, context.ChartSelectedCourse->GoGoRanges); break;
 				case TimelineRowType::Lyrics: DrawTimelineContentItemRowT<LyricChange, TimelineRowType::Lyrics>(rowParam, rowIt, context.ChartSelectedCourse->Lyrics); break;
-				case TimelineRowType::ScrollType: DrawTimelineContentItemRowT<ScrollType, TimelineRowType::ScrollType>(rowParam, rowIt, context.ChartSelectedCourse->ScrollTypes); break;
-				case TimelineRowType::JPOSScroll: DrawTimelineContentItemRowT<JPOSScrollChange, TimelineRowType::JPOSScroll>(rowParam, rowIt, context.ChartSelectedCourse->JPOSScrollChanges); break;
+				case TimelineRowType::ScrollType: DrawTimelineContentItemRowT<ScrollType, TimelineRowType::ScrollType>(rowParam, rowIt, context.ChartSelectedCourse->GetScrollTypes(context.ChartSelectedBranch)); break;
+				case TimelineRowType::JPOSScroll: DrawTimelineContentItemRowT<JPOSScrollChange, TimelineRowType::JPOSScroll>(rowParam, rowIt, context.ChartSelectedCourse->GetJPOSScrollChanges(context.ChartSelectedBranch)); break;
+				case TimelineRowType::BranchSections: DrawTimelineContentItemRowT<BranchSection, TimelineRowType::BranchSections>(rowParam, rowIt, context.ChartSelectedCourse->BranchSections); break;
+				case TimelineRowType::SectionMarkers: DrawTimelineContentItemRowT<SectionMarker, TimelineRowType::SectionMarkers>(rowParam, rowIt, context.ChartSelectedCourse->SectionMarkers); break;
 				default: { assert(!"Missing TimelineRowType switch case"); } break;
 				}
 			});

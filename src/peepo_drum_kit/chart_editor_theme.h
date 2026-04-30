@@ -81,6 +81,13 @@ namespace PeepoDrumKit
 	inline u32 TimelineJPOSScrollBackgroundColorOuter = 0xFF663F8F;
 	inline u32 TimelineJPOSScrollBackgroundColorInner = 0xFF363138;
 
+	inline u32 TimelineBranchSectionBackgroundColorBorder = 0xB01E1E1E;
+	inline u32 TimelineBranchSectionBackgroundColorBorderSelected = 0xFF979797;
+	inline u32 TimelineBranchSectionBackgroundColorOuter = 0xFF1E7BAF; // warm amber/gold
+	inline u32 TimelineBranchSectionBackgroundColorInner = 0xFF0A2A35; // dark amber
+
+	inline u32 TimelineSectionMarkerLineColor = 0xDC22E2BA; // teal/cyan for #SECTION markers
+
 	inline u32 TimelineHorizontalRowLineColor = 0x2D7D7D7D;
 	inline u32 TimelineGridBarLineColor = 0x807D7D7D;
 	inline u32 TimelineGridBeatLineColor = 0x2D7D7D7D;

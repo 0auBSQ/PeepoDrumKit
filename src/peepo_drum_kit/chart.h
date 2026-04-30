@@ -361,6 +361,31 @@ namespace PeepoDrumKit
 	constexpr Complex ScrollOrDefault(const ScrollChange* v) { return (v == nullptr) ? Complex(1.0f, 0.0f) : v->ScrollSpeed; }
 	constexpr Tempo TempoOrDefault(const TempoChange* v) { return (v == nullptr) ? FallbackTempo : v->Tempo; }
 
+	struct BranchSection
+	{
+		Beat BeatTime;
+		Beat BeatDuration;
+		TJA::BranchCondition Condition = TJA::BranchCondition::Precise;
+		i32 RequirementExpert = 100;
+		i32 RequirementMaster = 100;
+		b8 IsSelected = false;
+
+		constexpr Beat GetStart() const { return BeatTime; }
+		constexpr Beat GetEnd()   const { return BeatTime + BeatDuration; }
+	};
+	template <> constexpr std::string_view DisplayNameOfChartEvent<BranchSection> = "Branch Section";
+	template <>
+	inline BranchSection FallbackEvent<BranchSection> = { Beat::Zero(), Beat::FromBars(1) };
+
+	struct SectionMarker
+	{
+		Beat BeatTime;
+		b8 IsSelected = false;
+	};
+	template <> constexpr std::string_view DisplayNameOfChartEvent<SectionMarker> = "Section Marker";
+	template <>
+	inline SectionMarker FallbackEvent<SectionMarker> = {};
+
 	struct ChartCourse
 	{
 		DifficultyType Type = DifficultyType::Oni;
@@ -378,13 +403,23 @@ namespace PeepoDrumKit
 		SortedNotesList Notes_Expert;
 		SortedNotesList Notes_Master;
 
+		BeatSortedList<BranchSection> BranchSections;
+		BeatSortedList<SectionMarker> SectionMarkers;
+		inline b8 HasBranches() const { return !BranchSections.empty(); }
+
 		SortedScrollChangesList ScrollChanges;
+		SortedScrollChangesList ScrollChanges_Expert;
+		SortedScrollChangesList ScrollChanges_Master;
 		SortedBarLineChangesList BarLineChanges;
 		SortedGoGoRangesList GoGoRanges;
 		SortedLyricsList Lyrics;
 
 		SortedScrollTypesList ScrollTypes;
+		SortedScrollTypesList ScrollTypes_Expert;
+		SortedScrollTypesList ScrollTypes_Master;
 		SortedJPOSScrollChangesList JPOSScrollChanges;
+		SortedJPOSScrollChangesList JPOSScrollChanges_Expert;
+		SortedJPOSScrollChangesList JPOSScrollChanges_Master;
 
 		i32 ScoreInit = 0;
 		i32 ScoreDiff = 0;
@@ -397,6 +432,14 @@ namespace PeepoDrumKit
 
 		inline auto& GetNotes(BranchType branch) { assert(branch < BranchType::Count); return (&Notes_Normal)[EnumToIndex(branch)]; }
 		inline auto& GetNotes(BranchType branch) const { assert(branch < BranchType::Count); return (&Notes_Normal)[EnumToIndex(branch)]; }
+
+		inline SortedScrollChangesList& GetScrollChanges(BranchType b) { return b == BranchType::Expert ? ScrollChanges_Expert : b == BranchType::Master ? ScrollChanges_Master : ScrollChanges; }
+		inline const SortedScrollChangesList& GetScrollChanges(BranchType b) const { return b == BranchType::Expert ? ScrollChanges_Expert : b == BranchType::Master ? ScrollChanges_Master : ScrollChanges; }
+		inline const SortedGoGoRangesList& GetGoGoRanges(BranchType) const { return GoGoRanges; } // GoGo is shared across all branches
+		inline SortedScrollTypesList& GetScrollTypes(BranchType b) { return b == BranchType::Expert ? ScrollTypes_Expert : b == BranchType::Master ? ScrollTypes_Master : ScrollTypes; }
+		inline const SortedScrollTypesList& GetScrollTypes(BranchType b) const { return b == BranchType::Expert ? ScrollTypes_Expert : b == BranchType::Master ? ScrollTypes_Master : ScrollTypes; }
+		inline SortedJPOSScrollChangesList& GetJPOSScrollChanges(BranchType b) { return b == BranchType::Expert ? JPOSScrollChanges_Expert : b == BranchType::Master ? JPOSScrollChanges_Master : JPOSScrollChanges; }
+		inline const SortedJPOSScrollChangesList& GetJPOSScrollChanges(BranchType b) const { return b == BranchType::Expert ? JPOSScrollChanges_Expert : b == BranchType::Master ? JPOSScrollChanges_Master : JPOSScrollChanges; }
 
 		void RecalculateSENotes() const
 		{
@@ -486,11 +529,19 @@ namespace PeepoDrumKit
 		Notes_Expert,
 		Notes_Master,
 		ScrollChanges,
+		ScrollChanges_Expert,
+		ScrollChanges_Master,
 		BarLineChanges,
 		GoGoRanges,
 		Lyrics,
 		ScrollType,
+		ScrollTypes_Expert,
+		ScrollTypes_Master,
 		JPOSScroll,
+		JPOSScroll_Expert,
+		JPOSScroll_Master,
+		BranchSections,
+		SectionMarkers,
 		Count
 	};
 
@@ -538,7 +589,7 @@ namespace PeepoDrumKit
 	static_assert(GenericMemberFlags_All & (1u << (static_cast<u32>(GenericMember::Count) - 1)));
 	static_assert(!(GenericMemberFlags_All & (1u << static_cast<u32>(GenericMember::Count))));
 
-	constexpr cstr GenericListNames[] = { "TempoChanges", "SignatureChanges", "Notes_Normal", "Notes_Expert", "Notes_Master", "ScrollChanges", "BarLineChanges", "GoGoRanges", "Lyrics", "ScrollType", "JPOSScroll", };
+	constexpr cstr GenericListNames[] = { "TempoChanges", "SignatureChanges", "Notes_Normal", "Notes_Expert", "Notes_Master", "ScrollChanges", "ScrollChanges_Expert", "ScrollChanges_Master", "BarLineChanges", "GoGoRanges", "Lyrics", "ScrollType", "ScrollTypes_Expert", "ScrollTypes_Master", "JPOSScroll", "JPOSScroll_Expert", "JPOSScroll_Master", "BranchSections", "SectionMarkers", };
 	constexpr cstr GenericMemberNames[] = { "IsSelected", "BarLineVisible", "BalloonPopCount", "ScrollSpeed", "Start", "Duration", "Offset", "NoteType", "Tempo", "TimeSignature", "Lyric", "ScrollType", "JPOSScroll", "JPOSScrollDuration", };
 
 	// Member availability queries
@@ -723,6 +774,21 @@ namespace PeepoDrumKit
 		else if constexpr (Member == GenericMember::Beat_Start) return (std::forward<JPOSScrollChangeT>(event).BeatTime);
 	}
 
+	template <GenericMember Member, typename BranchSectionT, expect_type_t<BranchSectionT, BranchSection> = true>
+	constexpr decltype(auto) get(BranchSectionT&& event)
+	{
+		if constexpr (Member == GenericMember::B8_IsSelected) return (std::forward<BranchSectionT>(event).IsSelected);
+		else if constexpr (Member == GenericMember::Beat_Start)    return (std::forward<BranchSectionT>(event).BeatTime);
+		else if constexpr (Member == GenericMember::Beat_Duration) return (std::forward<BranchSectionT>(event).BeatDuration);
+	}
+
+	template <GenericMember Member, typename SectionMarkerT, expect_type_t<SectionMarkerT, SectionMarker> = true>
+	constexpr decltype(auto) get(SectionMarkerT&& event)
+	{
+		if constexpr (Member == GenericMember::B8_IsSelected) return (std::forward<SectionMarkerT>(event).IsSelected);
+		else if constexpr (Member == GenericMember::Beat_Start) return (std::forward<SectionMarkerT>(event).BeatTime);
+	}
+
 	// Member availability queries
 	template <typename T, auto Tag, typename = void>
 	struct has_get_t : std::false_type {};
@@ -893,6 +959,8 @@ namespace PeepoDrumKit
 			GoGoRange GoGo;
 			ScrollType ScrollType;
 			JPOSScrollChange JPOSScroll;
+			BranchSection BranchSec;
+			SectionMarker SectionMark;
 
 			inline PODData() { ::memset(this, 0, sizeof(*this)); }
 		} POD;
@@ -950,11 +1018,19 @@ namespace PeepoDrumKit
 		else if constexpr (List == GenericList::Notes_Expert) return (std::forward<ChartCourseT>(course).Notes_Expert);
 		else if constexpr (List == GenericList::Notes_Master) return (std::forward<ChartCourseT>(course).Notes_Master);
 		else if constexpr (List == GenericList::ScrollChanges) return (std::forward<ChartCourseT>(course).ScrollChanges);
+		else if constexpr (List == GenericList::ScrollChanges_Expert) return (std::forward<ChartCourseT>(course).ScrollChanges_Expert);
+		else if constexpr (List == GenericList::ScrollChanges_Master) return (std::forward<ChartCourseT>(course).ScrollChanges_Master);
 		else if constexpr (List == GenericList::BarLineChanges) return (std::forward<ChartCourseT>(course).BarLineChanges);
 		else if constexpr (List == GenericList::GoGoRanges) return (std::forward<ChartCourseT>(course).GoGoRanges);
 		else if constexpr (List == GenericList::Lyrics) return (std::forward<ChartCourseT>(course).Lyrics);
 		else if constexpr (List == GenericList::ScrollType) return (std::forward<ChartCourseT>(course).ScrollTypes);
+		else if constexpr (List == GenericList::ScrollTypes_Expert) return (std::forward<ChartCourseT>(course).ScrollTypes_Expert);
+		else if constexpr (List == GenericList::ScrollTypes_Master) return (std::forward<ChartCourseT>(course).ScrollTypes_Master);
 		else if constexpr (List == GenericList::JPOSScroll) return (std::forward<ChartCourseT>(course).JPOSScrollChanges);
+		else if constexpr (List == GenericList::JPOSScroll_Expert) return (std::forward<ChartCourseT>(course).JPOSScrollChanges_Expert);
+		else if constexpr (List == GenericList::JPOSScroll_Master) return (std::forward<ChartCourseT>(course).JPOSScrollChanges_Master);
+		else if constexpr (List == GenericList::BranchSections) return (std::forward<ChartCourseT>(course).BranchSections);
+		else if constexpr (List == GenericList::SectionMarkers) return (std::forward<ChartCourseT>(course).SectionMarkers);
 		else static_assert(false, "unhandled or invalid GenericList value");
 	}
 
@@ -970,11 +1046,19 @@ namespace PeepoDrumKit
 		else if constexpr (List == GenericList::Notes_Expert) return (std::forward<GenericListStructT>(inValue).POD.Note);
 		else if constexpr (List == GenericList::Notes_Master) return (std::forward<GenericListStructT>(inValue).POD.Note);
 		else if constexpr (List == GenericList::ScrollChanges) return (std::forward<GenericListStructT>(inValue).POD.Scroll);
+		else if constexpr (List == GenericList::ScrollChanges_Expert) return (std::forward<GenericListStructT>(inValue).POD.Scroll);
+		else if constexpr (List == GenericList::ScrollChanges_Master) return (std::forward<GenericListStructT>(inValue).POD.Scroll);
 		else if constexpr (List == GenericList::BarLineChanges) return (std::forward<GenericListStructT>(inValue).POD.BarLine);
 		else if constexpr (List == GenericList::GoGoRanges) return (std::forward<GenericListStructT>(inValue).POD.GoGo);
 		else if constexpr (List == GenericList::Lyrics) return (std::forward<GenericListStructT>(inValue).NonTrivial.Lyric);
 		else if constexpr (List == GenericList::ScrollType) return (std::forward<GenericListStructT>(inValue).POD.ScrollType);
+		else if constexpr (List == GenericList::ScrollTypes_Expert) return (std::forward<GenericListStructT>(inValue).POD.ScrollType);
+		else if constexpr (List == GenericList::ScrollTypes_Master) return (std::forward<GenericListStructT>(inValue).POD.ScrollType);
 		else if constexpr (List == GenericList::JPOSScroll) return (std::forward<GenericListStructT>(inValue).POD.JPOSScroll);
+		else if constexpr (List == GenericList::JPOSScroll_Expert) return (std::forward<GenericListStructT>(inValue).POD.JPOSScroll);
+		else if constexpr (List == GenericList::JPOSScroll_Master) return (std::forward<GenericListStructT>(inValue).POD.JPOSScroll);
+		else if constexpr (List == GenericList::BranchSections) return (std::forward<GenericListStructT>(inValue).POD.BranchSec);
+		else if constexpr (List == GenericList::SectionMarkers) return (std::forward<GenericListStructT>(inValue).POD.SectionMark);
 		else static_assert(false, "unhandled or invalid GenericList value");
 	}
 
@@ -1046,11 +1130,19 @@ namespace PeepoDrumKit
 		X(GenericList::Notes_Expert)
 		X(GenericList::Notes_Master)
 		X(GenericList::ScrollChanges)
+		X(GenericList::ScrollChanges_Expert)
+		X(GenericList::ScrollChanges_Master)
 		X(GenericList::BarLineChanges)
 		X(GenericList::GoGoRanges)
 		X(GenericList::Lyrics)
 		X(GenericList::ScrollType)
+		X(GenericList::ScrollTypes_Expert)
+		X(GenericList::ScrollTypes_Master)
 		X(GenericList::JPOSScroll)
+		X(GenericList::JPOSScroll_Expert)
+		X(GenericList::JPOSScroll_Master)
+		X(GenericList::BranchSections)
+		X(GenericList::SectionMarkers)
 #undef X
 		default: assert(false); return keep_or_static_cast<TRet>(vError);
 		}
@@ -1088,9 +1180,9 @@ namespace PeepoDrumKit
 
 	// course list attribute query functions
 	constexpr b8 IsNotesList(GenericList list) { return (list == GenericList::Notes_Normal) || (list == GenericList::Notes_Expert) || (list == GenericList::Notes_Master); }
-	constexpr b8 ListHasDurations(GenericList list) { return IsNotesList(list) || (list == GenericList::GoGoRanges); }
-	constexpr b8 ListUsesInclusiveBeatCheck(GenericList list) { return IsNotesList(list) || (list != GenericList::GoGoRanges && list != GenericList::Lyrics); }
-	constexpr b8 ListIsItemEndBounded(GenericList list) { return IsNotesList(list) || (list == GenericList::GoGoRanges) || (list == GenericList::JPOSScroll); }
+	constexpr b8 ListHasDurations(GenericList list) { return IsNotesList(list) || (list == GenericList::GoGoRanges) || (list == GenericList::BranchSections); }
+	constexpr b8 ListUsesInclusiveBeatCheck(GenericList list) { return IsNotesList(list) || (list != GenericList::GoGoRanges && list != GenericList::Lyrics && list != GenericList::BranchSections && list != GenericList::SectionMarkers); }
+	constexpr b8 ListIsItemEndBounded(GenericList list) { return IsNotesList(list) || (list == GenericList::GoGoRanges) || (list == GenericList::JPOSScroll) || (list == GenericList::BranchSections); }
 	constexpr b8 ListHasNoteStaticEffects(GenericList list) { return (list == GenericList::TempoChanges) || (list == GenericList::ScrollChanges) || (list == GenericList::ScrollType); }
 	constexpr b8 ListHasBarlineStaticEffects(GenericList list) { return ListHasNoteStaticEffects(list) || (list == GenericList::BarLineChanges); }
 

@@ -1375,7 +1375,7 @@ namespace TJA
 				} break;
 				case ParsedChartCommandType::ResetAccuracyValues:
 				{
-					// TODO:
+					appendCommandLine(out, Key::Chart_SECTION, "");
 				} break;
 				case ParsedChartCommandType::SetLyricLine:
 				{
@@ -1437,6 +1437,12 @@ namespace TJA
 		TimeSignature lastSignature = DefaultTimeSignature;
 		for (const ConvertedMeasure& inMeasure : inMeasures)
 		{
+			if (inMeasure.HasSectionMarker)
+			{
+				ParsedChartCommand& tempCommand = tempBuffer.emplace_back(TempCommand { Beat::Zero() }).ParsedCommand;
+				tempCommand.Type = ParsedChartCommandType::ResetAccuracyValues;
+			}
+
 			if (inMeasure.TimeSignature != lastSignature)
 			{
 				ParsedChartCommand& tempCommand = tempBuffer.emplace_back(TempCommand { Beat::Zero() }).ParsedCommand;
@@ -1610,7 +1616,16 @@ namespace TJA
 		out.CourseMetadata = inCourse.Metadata;
 
 		{
-			const size_t measureCount = std::count_if(inCourse.ChartCommands.begin(), inCourse.ChartCommands.end(), [](auto& c) { return c.Type == ParsedChartCommandType::MeasureEnd; });
+			// Count only Normal-branch measures inside branch blocks to avoid multiplying the measure count.
+			size_t measureCount = 0;
+			{ bool inBlock = false, isNorm = true;
+			  for (const auto& c : inCourse.ChartCommands) {
+				if      (c.Type == ParsedChartCommandType::BranchStart)  { inBlock = true;  isNorm = false; }
+				else if (c.Type == ParsedChartCommandType::BranchNormal) { isNorm = true; }
+				else if (c.Type == ParsedChartCommandType::BranchExpert || c.Type == ParsedChartCommandType::BranchMaster) { isNorm = false; }
+				else if (c.Type == ParsedChartCommandType::BranchEnd)    { inBlock = false; isNorm = true; }
+				else if (c.Type == ParsedChartCommandType::MeasureEnd && (!inBlock || isNorm)) { ++measureCount; }
+			  } }
 			out.Measures.reserve(measureCount + 1);
 		}
 
@@ -1619,8 +1634,18 @@ namespace TJA
 			ConvertedMeasure* currentMeasure = &out.Measures.emplace_back();
 			currentMeasure->TimeSignature = DefaultTimeSignature;
 
+			// Only process Normal-branch content inside branch blocks so the measure/beat timeline is correct.
+			bool mbInBlock = false, mbIsNorm = true;
 			for (const ParsedChartCommand& command : inCourse.ChartCommands)
 			{
+				if      (command.Type == ParsedChartCommandType::BranchStart)  { mbInBlock = true;  mbIsNorm = false; continue; }
+				else if (command.Type == ParsedChartCommandType::BranchNormal) { mbIsNorm = true;  continue; }
+				else if (command.Type == ParsedChartCommandType::BranchExpert || command.Type == ParsedChartCommandType::BranchMaster) { mbIsNorm = false; continue; }
+				else if (command.Type == ParsedChartCommandType::BranchEnd)    { mbInBlock = false; mbIsNorm = true; continue; }
+				else if (command.Type == ParsedChartCommandType::ResetAccuracyValues || command.Type == ParsedChartCommandType::BranchLevelHold) { continue; }
+
+				if (mbInBlock && !mbIsNorm) continue; // skip Expert/Master content
+
 				if (command.Type == ParsedChartCommandType::MeasureNotes)
 				{
 					for (const NoteType note : command.Param.MeasureNotes.Notes)
@@ -1658,8 +1683,47 @@ namespace TJA
 			Beat currentTimeWithinMeasure = Beat::Zero();
 			i32 currentNotesInMeasure = 0;
 
+			// Track branch state so non-note metadata (gogo, scroll, etc.) is only taken
+			// from non-branched sections or from the Normal branch to avoid duplication.
+			bool inBranchBlock = false;
+			bool isNormalBranchActive = true; // treat pre-first-label commands as Normal
+
 			for (const ParsedChartCommand& command : inCourse.ChartCommands)
 			{
+				// Branch state tracking
+				if (command.Type == ParsedChartCommandType::BranchStart)
+				{
+					inBranchBlock = true;
+					isNormalBranchActive = false;
+					continue;
+				}
+				else if (command.Type == ParsedChartCommandType::BranchNormal)
+				{
+					isNormalBranchActive = true;
+					continue;
+				}
+				else if (command.Type == ParsedChartCommandType::BranchExpert || command.Type == ParsedChartCommandType::BranchMaster)
+				{
+					isNormalBranchActive = false;
+					continue;
+				}
+				else if (command.Type == ParsedChartCommandType::BranchEnd)
+				{
+					inBranchBlock = false;
+					isNormalBranchActive = true;
+					continue;
+				}
+				else if (command.Type == ParsedChartCommandType::ResetAccuracyValues || command.Type == ParsedChartCommandType::BranchLevelHold)
+				{
+					continue;
+				}
+
+				// Within branch blocks, only process non-note metadata for the Normal branch
+				// Only advance measure pointer / note counters for the branch we actually built measures for.
+				// (Expert/Master MeasureEnd commands would walk currentMeasure past out.Measures otherwise.)
+				const bool processSharedData = !inBranchBlock || isNormalBranchActive;
+				if (!processSharedData) continue;
+
 				if (command.Type == ParsedChartCommandType::MeasureNotes)
 				{
 					currentNotesInMeasure += static_cast<i32>(command.Param.MeasureNotes.Notes.size());
@@ -1677,51 +1741,61 @@ namespace TJA
 				}
 				else if (command.Type == ParsedChartCommandType::ChangeTempo)
 				{
-					currentMeasure->TempoChanges.push_back(ConvertedTempoChange { currentTimeWithinMeasure, command.Param.ChangeTempo.Value });
+					if (processSharedData)
+						currentMeasure->TempoChanges.push_back(ConvertedTempoChange { currentTimeWithinMeasure, command.Param.ChangeTempo.Value });
 				}
 				else if (command.Type == ParsedChartCommandType::ChangeDelay)
 				{
-					currentMeasure->DelayChanges.push_back(ConvertedDelayChange { currentTimeWithinMeasure, command.Param.ChangeDelay.Value });
+					if (processSharedData)
+						currentMeasure->DelayChanges.push_back(ConvertedDelayChange { currentTimeWithinMeasure, command.Param.ChangeDelay.Value });
 				}
 				else if (command.Type == ParsedChartCommandType::ChangeScrollSpeed)
 				{
-					currentMeasure->ScrollChanges.push_back(ConvertedScrollChange { currentTimeWithinMeasure, command.Param.ChangeScrollSpeed.Value });
+					if (processSharedData)
+						currentMeasure->ScrollChanges.push_back(ConvertedScrollChange { currentTimeWithinMeasure, command.Param.ChangeScrollSpeed.Value });
 				}
 				else if (command.Type == ParsedChartCommandType::GoGoStart)
 				{
-					const Beat startTime = currentMeasure->StartTime + currentTimeWithinMeasure;
-					out.GoGoRanges.push_back(ConvertedGoGoRange { startTime, startTime });
+					if (processSharedData)
+					{
+						const Beat startTime = currentMeasure->StartTime + currentTimeWithinMeasure;
+						out.GoGoRanges.push_back(ConvertedGoGoRange { startTime, startTime });
+					}
 				}
 				else if (command.Type == ParsedChartCommandType::GoGoEnd)
 				{
-					if (!out.GoGoRanges.empty())
+					if (processSharedData && !out.GoGoRanges.empty())
 						out.GoGoRanges.back().EndTime = currentMeasure->StartTime + currentTimeWithinMeasure;
 				}
 				else if (command.Type == ParsedChartCommandType::ChangeBarLine)
 				{
-					currentMeasure->BarLineChanges.push_back(ConvertedBarLineChange { currentTimeWithinMeasure, command.Param.ChangeBarLine.Visible });
+					if (processSharedData)
+						currentMeasure->BarLineChanges.push_back(ConvertedBarLineChange { currentTimeWithinMeasure, command.Param.ChangeBarLine.Visible });
 				}
 				else if (command.Type == ParsedChartCommandType::SetLyricLine)
 				{
-					currentMeasure->LyricChanges.push_back(ConvertedLyricChange { currentTimeWithinMeasure, command.Param.SetLyricLine.Value });
+					if (processSharedData)
+						currentMeasure->LyricChanges.push_back(ConvertedLyricChange { currentTimeWithinMeasure, command.Param.SetLyricLine.Value });
 				}
-				else if (command.Type == ParsedChartCommandType::NMScroll || command.Type == ParsedChartCommandType::HBScroll || command.Type == ParsedChartCommandType::BMScroll) 
+				else if (command.Type == ParsedChartCommandType::NMScroll || command.Type == ParsedChartCommandType::HBScroll || command.Type == ParsedChartCommandType::BMScroll)
 				{
-					currentMeasure->ScrollTypes.push_back(ConvertedScrollType{ currentTimeWithinMeasure,
-						static_cast<i8>((command.Type == ParsedChartCommandType::NMScroll)
-						? 0
-						: (command.Type == ParsedChartCommandType::HBScroll)
-						? 1
-						: 2
-						)});
+					if (processSharedData)
+						currentMeasure->ScrollTypes.push_back(ConvertedScrollType{ currentTimeWithinMeasure,
+							static_cast<i8>((command.Type == ParsedChartCommandType::NMScroll)
+							? 0
+							: (command.Type == ParsedChartCommandType::HBScroll)
+							? 1
+							: 2
+							)});
 				}
-				else if (command.Type == ParsedChartCommandType::SetJPOSScroll) 
+				else if (command.Type == ParsedChartCommandType::SetJPOSScroll)
 				{
-					currentMeasure->JPOSScrollChanges.push_back(ConvertedJPOSScroll{
-						currentTimeWithinMeasure,
-						command.Param.ChangeJPOSScroll.Move,
-						command.Param.ChangeJPOSScroll.Duration.ToSec_F32()
-						});
+					if (processSharedData)
+						currentMeasure->JPOSScrollChanges.push_back(ConvertedJPOSScroll{
+							currentTimeWithinMeasure,
+							command.Param.ChangeJPOSScroll.Move,
+							command.Param.ChangeJPOSScroll.Duration.ToSec_F32()
+							});
 				}
 			}
 

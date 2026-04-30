@@ -690,7 +690,8 @@ namespace PeepoDrumKit
 							if (Gui::BeginTabItem(buffer, nullptr, setSelectedThisFrame ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None))
 							{
 								// TODO: Selecting a course should also be an undo command so that there isn't ever any confusion (?)
-								context.SetSelectedChart(course.get(), BranchType::Normal);
+								// Preserve branch when reselecting the same course
+						context.SetSelectedChart(course.get(), (course.get() == context.ChartSelectedCourse) ? context.ChartSelectedBranch : BranchType::Normal);
 								lastFrameSelectedCoursePtrID = context.ChartSelectedCourse;
 								isAnyCourseTabSelected = true;
 								Gui::EndTabItem();
@@ -1055,6 +1056,43 @@ namespace PeepoDrumKit
 
 		// NOTE: Always update the timeline even if the window isn't visible so that child-windows can be docked properly and hit sounds can always be heard
 		Gui::Begin(UI_WindowName("TAB_TIMELINE"), nullptr, ImGuiWindowFlags_None);
+		// Branch selector: shown when the selected course has branches
+		if (context.ChartSelectedCourse != nullptr && context.ChartSelectedCourse->HasBranches())
+		{
+			static const cstr branchLabels[] = { " N ", " E ", " M " };
+			static const cstr branchFullNames[] = { "Normal", "Expert", "Master" };
+			// Hex: 0xAABBGGRR  (ImGui color order)
+			static constexpr u32 branchBgActive[3]   = { IM_COL32(100, 180, 255, 200), IM_COL32(50, 185, 220, 200), IM_COL32(80, 80, 220, 200) };
+			static constexpr u32 branchBgInactive[3] = { IM_COL32(70, 120, 180, 120),  IM_COL32(40, 135, 160, 120), IM_COL32(55, 55, 160, 120) };
+			static constexpr u32 branchText[3]        = { IM_COL32(200, 230, 255, 255), IM_COL32(150, 240, 255, 255), IM_COL32(180, 180, 255, 255) };
+
+			const size_t nSections = context.ChartSelectedCourse->BranchSections.size();
+			char sectionCountBuf[48];
+			sprintf_s(sectionCountBuf, "Branch (%zu section%s):", nSections, nSections == 1 ? "" : "s");
+			Gui::AlignTextToFramePadding();
+			Gui::TextUnformatted(sectionCountBuf);
+
+			auto colF = [](u32 hex) -> ImVec4 {
+				return ImVec4((hex & 0xFF) / 255.f, ((hex >> 8) & 0xFF) / 255.f, ((hex >> 16) & 0xFF) / 255.f, ((hex >> 24) & 0xFF) / 255.f);
+			};
+
+			for (i32 b = 0; b < 3; b++)
+			{
+				Gui::SameLine();
+				const BranchType branch = static_cast<BranchType>(b);
+				const b8 isActive = (context.ChartSelectedBranch == branch);
+				Gui::PushStyleColor(ImGuiCol_Button,        colF(isActive ? branchBgActive[b] : branchBgInactive[b]));
+				Gui::PushStyleColor(ImGuiCol_ButtonHovered, colF(branchBgActive[b]));
+				Gui::PushStyleColor(ImGuiCol_ButtonActive,  colF(branchBgActive[b]));
+				Gui::PushStyleColor(ImGuiCol_Text,          colF(branchText[b]));
+				if (Gui::Button(branchLabels[b]))
+					context.SetSelectedChart(context.ChartSelectedCourse, branch);
+				Gui::PopStyleColor(4);
+				if (Gui::IsItemHovered())
+					Gui::SetTooltip("Switch to %s branch", branchFullNames[b]);
+			}
+			Gui::Separator();
+		}
 		timeline.DrawGui(context);
 		Gui::End();
 

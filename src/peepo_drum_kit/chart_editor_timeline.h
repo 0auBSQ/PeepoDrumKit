@@ -79,6 +79,8 @@ namespace PeepoDrumKit
 		Lyrics,
 		ScrollType,
 		JPOSScroll,
+		BranchSections,
+		SectionMarkers,
 		Count,
 
 		NoteBranches_First = Notes_Normal,
@@ -98,6 +100,8 @@ namespace PeepoDrumKit
 		"EVENT_LYRICS",
 		"EVENT_SCROLL_TYPE",
 		"EVENT_JPOS_SCROLL",
+		"EVENT_BRANCH_SECTIONS",
+		"EVENT_SECTION_MARKERS",
 	};
 
 	constexpr GenericList TimelineRowToGenericList(TimelineRowType row)
@@ -108,13 +112,15 @@ namespace PeepoDrumKit
 		case TimelineRowType::TimeSignature: return GenericList::SignatureChanges;
 		case TimelineRowType::Notes_Normal: return GenericList::Notes_Normal;
 		case TimelineRowType::Notes_Expert: return GenericList::Notes_Expert;
-		case TimelineRowType::Notes_Master: return GenericList::Notes_Expert;
+		case TimelineRowType::Notes_Master: return GenericList::Notes_Master;
 		case TimelineRowType::ScrollSpeed: return GenericList::ScrollChanges;
 		case TimelineRowType::BarLineVisibility: return GenericList::BarLineChanges;
 		case TimelineRowType::GoGoTime: return GenericList::GoGoRanges;
 		case TimelineRowType::Lyrics: return GenericList::Lyrics;
 		case TimelineRowType::ScrollType: return GenericList::ScrollType;
 		case TimelineRowType::JPOSScroll: return GenericList::JPOSScroll;
+		case TimelineRowType::BranchSections: return GenericList::BranchSections;
+		case TimelineRowType::SectionMarkers: return GenericList::SectionMarkers;
 		default: assert(false); return GenericList::Count;
 		}
 	}
@@ -134,8 +140,33 @@ namespace PeepoDrumKit
 		case GenericList::Lyrics: return TimelineRowType::Lyrics;
 		case GenericList::ScrollType: return TimelineRowType::ScrollType;
 		case GenericList::JPOSScroll: return TimelineRowType::JPOSScroll;
+		case GenericList::ScrollChanges_Expert: return TimelineRowType::ScrollSpeed;
+		case GenericList::ScrollChanges_Master: return TimelineRowType::ScrollSpeed;
+		case GenericList::ScrollTypes_Expert:  return TimelineRowType::ScrollType;
+		case GenericList::ScrollTypes_Master:  return TimelineRowType::ScrollType;
+		case GenericList::JPOSScroll_Expert:   return TimelineRowType::JPOSScroll;
+		case GenericList::JPOSScroll_Master:   return TimelineRowType::JPOSScroll;
+		case GenericList::BranchSections: return TimelineRowType::BranchSections;
+		case GenericList::SectionMarkers: return TimelineRowType::SectionMarkers;
 		default: assert(false); return TimelineRowType::Count;
 		}
+	}
+
+	// Returns the GenericList that actually backs the given row for the selected branch
+	// (Normal always maps to the base list; Expert/Master map to per-branch lists for gimmick rows)
+	inline GenericList GetEffectiveGenericList(TimelineRowType row, BranchType branch)
+	{
+		if (branch == BranchType::Expert) {
+			if (row == TimelineRowType::ScrollSpeed) return GenericList::ScrollChanges_Expert;
+			if (row == TimelineRowType::ScrollType)  return GenericList::ScrollTypes_Expert;
+			if (row == TimelineRowType::JPOSScroll)  return GenericList::JPOSScroll_Expert;
+		}
+		if (branch == BranchType::Master) {
+			if (row == TimelineRowType::ScrollSpeed) return GenericList::ScrollChanges_Master;
+			if (row == TimelineRowType::ScrollType)  return GenericList::ScrollTypes_Master;
+			if (row == TimelineRowType::JPOSScroll)  return GenericList::JPOSScroll_Master;
+		}
+		return TimelineRowToGenericList(row);
 	}
 
 	constexpr BranchType TimelineRowToBranchType(TimelineRowType rowType)
@@ -271,7 +302,9 @@ namespace PeepoDrumKit
 		f32 WorldSpaceCursorXAnimationCurrent = 0.0f;
 		f32 GridSnapLineAnimationCurrent = 1.0f;
 
-		b8 PlaybackSoundsEnabled = true;
+		b8 SelectedCourseHasBranches = false; // cached per-frame; used for row height and branch overlays
+
+	b8 PlaybackSoundsEnabled = true;
 		struct MetronomeData
 		{
 			b8 IsEnabled = false;

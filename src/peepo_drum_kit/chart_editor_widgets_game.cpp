@@ -378,10 +378,28 @@ namespace PeepoDrumKit
 				return ControlFlow::Continue;
 
 			const Time time = course.TempoMap.BeatToTime(it.Beat);
+			// Use Normal scroll as base; branch-specific overrides within branch sections
+			const Complex scrollAtBeat = [&]() -> Complex {
+				if (branch != BranchType::Normal) {
+					const auto& branchList = course.GetScrollChanges(branch);
+					if (!branchList.empty()) {
+						if (const ScrollChange* sc = branchList.TryFindLastAtBeat(it.Beat)) return sc->ScrollSpeed;
+					}
+				}
+				return ScrollOrDefault(scrollChangeIt.Next(course.ScrollChanges.Sorted, it.Beat));
+			}();
+			const ScrollMethod scrollTypeAtBeat = [&]() -> ScrollMethod {
+				if (branch != BranchType::Normal) {
+					const auto& branchList = course.GetScrollTypes(branch);
+					if (!branchList.empty()) {
+						if (const ScrollType* st = branchList.TryFindLastAtBeat(it.Beat)) return st->Method;
+					}
+				}
+				return ScrollTypeOrDefault(scrollTypeIt.Next(course.ScrollTypes.Sorted, it.Beat));
+			}();
 			perBarFunc(ForEachBarLaneData { it.Beat, time,
 				TempoOrDefault(tempoChangeIt.Next(course.TempoMap.Tempo.Sorted, it.Beat)),
-				ScrollOrDefault(scrollChangeIt.Next(course.ScrollChanges.Sorted, it.Beat)), 
-				ScrollTypeOrDefault(scrollTypeIt.Next(course.ScrollTypes.Sorted, it.Beat)),
+				scrollAtBeat, scrollTypeAtBeat,
 				it.BarIndex });
 
 			return ControlFlow::Continue;
@@ -419,15 +437,28 @@ namespace PeepoDrumKit
 			const Time head = (course.TempoMap.BeatToTime(beat) + note.TimeOffset);
 			const Beat beatTail = (note.BeatDuration > Beat::Zero()) ? (beat + note.BeatDuration) : beat;
 			const Time tail = (note.BeatDuration > Beat::Zero()) ? (course.TempoMap.BeatToTime(beatTail) + note.TimeOffset) : head;
-			perNoteFunc(ForEachNoteLaneData { &note, beat, head,
+			// Use Normal scroll as base; branch-specific overrides when available
+		auto getEffectiveScroll = [&](Beat b) -> Complex {
+			if (branch != BranchType::Normal) {
+				const auto& branchList = course.GetScrollChanges(branch);
+				if (!branchList.empty()) { if (const ScrollChange* sc = branchList.TryFindLastAtBeat(b)) return sc->ScrollSpeed; }
+			}
+			return ScrollOrDefault(scrollChangeIt.Next(course.ScrollChanges.Sorted, b));
+		};
+		auto getEffectiveScrollType = [&](Beat b) -> ScrollMethod {
+			if (branch != BranchType::Normal) {
+				const auto& branchList = course.GetScrollTypes(branch);
+				if (!branchList.empty()) { if (const ScrollType* st = branchList.TryFindLastAtBeat(b)) return st->Method; }
+			}
+			return ScrollTypeOrDefault(scrollTypeIt.Next(course.ScrollTypes.Sorted, b));
+		};
+		perNoteFunc(ForEachNoteLaneData { &note, beat, head,
 				TempoOrDefault(tempoChangeIt.Next(course.TempoMap.Tempo.Sorted, beat)),
-				ScrollOrDefault(scrollChangeIt.Next(course.ScrollChanges.Sorted, beat)),
-				ScrollTypeOrDefault(scrollTypeIt.Next(course.ScrollTypes.Sorted, beat)),
+				getEffectiveScroll(beat), getEffectiveScrollType(beat),
 				{
 					beatTail, tail,
 					TempoOrDefault(tempoChangeIt.Next(course.TempoMap.Tempo.Sorted, beatTail)),
-					ScrollOrDefault(scrollChangeIt.Next(course.ScrollChanges.Sorted, beatTail)),
-					ScrollTypeOrDefault(scrollTypeIt.Next(course.ScrollTypes.Sorted, beatTail)),
+					getEffectiveScroll(beatTail), getEffectiveScrollType(beatTail),
 				},
 			});
 		}
@@ -611,7 +642,8 @@ namespace PeepoDrumKit
 		i32 iLane = -1;
 		for (auto it = cbegin(context.Chart.Courses); it != cend(context.Chart.Courses); ++it) {
 			const auto* course = it->get();
-			auto branch = BranchType::Normal;
+			// Use the selected branch for the focused course; Normal for compared courses
+			const BranchType branch = (course == context.ChartSelectedCourse) ? context.ChartSelectedBranch : BranchType::Normal;
 			if (!context.IsChartCompared(course, branch))
 				continue;
 			const b8 isFocusedLane = (context.CompareMode && course == context.ChartSelectedCourse && branch == context.ChartSelectedBranch);

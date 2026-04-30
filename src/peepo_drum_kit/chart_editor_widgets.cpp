@@ -1146,7 +1146,7 @@ namespace PeepoDrumKit
 			{
 				if (Gui::Property::BeginTable(ImGuiTableFlags_BordersInner))
 				{
-					const cstr listTypeNames[] = { UI_Str("SELECTED_EVENTS_TEMPOS"), UI_Str("SELECTED_EVENTS_TIME_SIGNATURES"), UI_Str("EVENT_NOTES"), UI_Str("EVENT_NOTES"), UI_Str("EVENT_NOTES"), UI_Str("SELECTED_EVENTS_SCROLL_SPEEDS"), UI_Str("SELECTED_EVENTS_BAR_LINE_VISIBILITIES"), UI_Str("SELECTED_EVENTS_GO_GO_RANGES"), UI_Str("EVENT_LYRICS"), UI_Str("SELECTED_EVENTS_SCROLL_TYPES"), UI_Str("SELECTED_EVENTS_JPOS_SCROLLS"), };
+					const cstr listTypeNames[] = { UI_Str("SELECTED_EVENTS_TEMPOS"), UI_Str("SELECTED_EVENTS_TIME_SIGNATURES"), UI_Str("EVENT_NOTES"), UI_Str("EVENT_NOTES"), UI_Str("EVENT_NOTES"), UI_Str("SELECTED_EVENTS_SCROLL_SPEEDS"), UI_Str("SELECTED_EVENTS_SCROLL_SPEEDS"), UI_Str("SELECTED_EVENTS_SCROLL_SPEEDS"), UI_Str("SELECTED_EVENTS_BAR_LINE_VISIBILITIES"), UI_Str("SELECTED_EVENTS_GO_GO_RANGES"), UI_Str("EVENT_LYRICS"), UI_Str("SELECTED_EVENTS_SCROLL_TYPES"), UI_Str("SELECTED_EVENTS_SCROLL_TYPES"), UI_Str("SELECTED_EVENTS_SCROLL_TYPES"), UI_Str("SELECTED_EVENTS_JPOS_SCROLLS"), UI_Str("SELECTED_EVENTS_JPOS_SCROLLS"), UI_Str("SELECTED_EVENTS_JPOS_SCROLLS"), UI_Str("EVENT_BRANCH_SECTIONS"), UI_Str("EVENT_SECTION_MARKERS"), };
 					static_assert(ArrayCount(listTypeNames) == EnumCount<GenericList>);
 
 					Gui::Property::Property([&]
@@ -1869,6 +1869,38 @@ namespace PeepoDrumKit
 						context.Undo.Execute<Commands::ChangeMultipleGenericProperties>(&course, std::move(propertiesToChange));
 					}
 
+					// BranchSection-specific condition/requirement editing
+					if (commonListType == GenericList::BranchSections && !SelectedItems.empty())
+					{
+						const Beat firstBeat = SelectedItems[0].MemberValues.BeatStart();
+						BranchSection* editSec = course.BranchSections.TryFindExactAtBeat(firstBeat);
+						if (editSec != nullptr)
+						{
+							Gui::Property::PropertyTextValueFunc(UI_Str("EVENT_PROP_BRANCH_CONDITION"), [&]
+							{
+								static const char* condNames[EnumCount<TJA::BranchCondition>] = { "Roll (r)", "Precise (p)", "Score (s)" };
+								Gui::PushItemWidth(-1.0f);
+								if (Gui::ComboEnum("##BranchCond", &editSec->Condition, condNames))
+									context.Undo.NotifyChangesWereMade();
+								Gui::PopItemWidth();
+							});
+							Gui::Property::PropertyTextValueFunc(UI_Str("EVENT_PROP_BRANCH_REQ_EXPERT"), [&]
+							{
+								int reqE = editSec->RequirementExpert;
+								Gui::PushItemWidth(-1.0f);
+								if (Gui::InputInt("##ReqE", &reqE)) { context.Undo.NotifyChangesWereMade(); editSec->RequirementExpert = reqE; }
+								Gui::PopItemWidth();
+							});
+							Gui::Property::PropertyTextValueFunc(UI_Str("EVENT_PROP_BRANCH_REQ_MASTER"), [&]
+							{
+								int reqM = editSec->RequirementMaster;
+								Gui::PushItemWidth(-1.0f);
+								if (Gui::InputInt("##ReqM", &reqM)) { context.Undo.NotifyChangesWereMade(); editSec->RequirementMaster = reqM; }
+								Gui::PopItemWidth();
+							});
+						}
+					}
+
 					Gui::Property::EndTable();
 				}
 			}
@@ -2422,14 +2454,15 @@ namespace PeepoDrumKit
 					Gui::PopID();
 				});
 
-				const ScrollChange* scrollChangeChangeAtCursor = course.ScrollChanges.TryFindLastAtBeat(cursorBeat);
+				auto& curScrollList = course.GetScrollChanges(context.ChartSelectedBranch);
+				const ScrollChange* scrollChangeChangeAtCursor = curScrollList.TryFindLastAtBeat(cursorBeat);
 				const Complex scrollSpeedAtCursor = (scrollChangeChangeAtCursor != nullptr) ? scrollChangeChangeAtCursor->ScrollSpeed : FallbackEvent<ScrollChange>.ScrollSpeed;
 				auto insertOrUpdateCursorScrollSpeedChange = [&](Complex newScrollSpeed)
 				{
 					if (scrollChangeChangeAtCursor == nullptr || scrollChangeChangeAtCursor->BeatTime != cursorBeat)
-						context.Undo.Execute<Commands::AddScrollChange>(&course, &course.ScrollChanges, ScrollChange { cursorBeat, newScrollSpeed });
+						context.Undo.Execute<Commands::AddScrollChange>(&course, &curScrollList, ScrollChange { cursorBeat, newScrollSpeed });
 					else
-						context.Undo.Execute<Commands::UpdateScrollChange>(&course, &course.ScrollChanges, ScrollChange { cursorBeat, newScrollSpeed });
+						context.Undo.Execute<Commands::UpdateScrollChange>(&course, &curScrollList, ScrollChange { cursorBeat, newScrollSpeed });
 				};
 
 				Gui::Property::Property([&]
@@ -2466,11 +2499,11 @@ namespace PeepoDrumKit
 						return false;
 					});
 
-					Gui::PushID(&course.ScrollChanges);
+					Gui::PushID(&curScrollList);
 					if (!disallowRemoveButton && scrollChangeChangeAtCursor != nullptr && scrollChangeChangeAtCursor->BeatTime == cursorBeat)
 					{
 						if (Gui::Button(UI_Str("ACT_EVENT_REMOVE"), { getInsertButtonWidth(), 0.0f }))
-							context.Undo.Execute<Commands::RemoveScrollChange>(&course, &course.ScrollChanges, cursorBeat);
+							context.Undo.Execute<Commands::RemoveScrollChange>(&course, &curScrollList, cursorBeat);
 					}
 					else
 					{
@@ -2529,13 +2562,14 @@ namespace PeepoDrumKit
 
 				Gui::Property::PropertyTextValueFunc(UI_Str("EVENT_SCROLL_TYPE"), [&]
 				{
-						const ScrollType* ScrollTypeAtCursor = course.ScrollTypes.TryFindLastAtBeat(cursorBeat);
+						auto& curScrollTypeList = course.GetScrollTypes(context.ChartSelectedBranch);
+						const ScrollType* ScrollTypeAtCursor = curScrollTypeList.TryFindLastAtBeat(cursorBeat);
 						auto insertOrUpdateCursorScrollType = [&](ScrollMethod newMethod)
 						{
 							if (ScrollTypeAtCursor == nullptr || ScrollTypeAtCursor->BeatTime != cursorBeat)
-								context.Undo.Execute<Commands::AddScrollType>(&course, &course.ScrollTypes, ScrollType{ cursorBeat, newMethod });
+								context.Undo.Execute<Commands::AddScrollType>(&course, &curScrollTypeList, ScrollType{ cursorBeat, newMethod });
 							else
-								context.Undo.Execute<Commands::UpdateScrollType>(&course, &course.ScrollTypes, ScrollType{ cursorBeat, newMethod });
+								context.Undo.Execute<Commands::UpdateScrollType>(&course, &curScrollTypeList, ScrollType{ cursorBeat, newMethod });
 						};
 
 						Gui::BeginDisabled(disableEditingAtPlayCursor);
@@ -2543,11 +2577,11 @@ namespace PeepoDrumKit
 						if (ScrollMethod v = (ScrollTypeAtCursor != nullptr) ? ScrollTypeAtCursor->Method : FallbackEvent<ScrollType>.Method; GuiEnumLikeButtons("##ScrollTypeAtCursor", &v, UI_Str("SCROLL_TYPE_NMSCROLL"), UI_Str("SCROLL_TYPE_HBSCROLL"), UI_Str("SCROLL_TYPE_BMSCROLL")))
 							insertOrUpdateCursorScrollType(v);
 
-						Gui::PushID(&course.ScrollTypes);
+						Gui::PushID(&curScrollTypeList);
 						if (!disallowRemoveButton && ScrollTypeAtCursor != nullptr && ScrollTypeAtCursor->BeatTime == cursorBeat)
 						{
 							if (Gui::Button(UI_Str("ACT_EVENT_REMOVE"), { getInsertButtonWidth(), 0.0f }))
-								context.Undo.Execute<Commands::RemoveScrollType>(&course, &course.ScrollTypes, cursorBeat);
+								context.Undo.Execute<Commands::RemoveScrollType>(&course, &curScrollTypeList, cursorBeat);
 						}
 						else
 						{
@@ -2565,15 +2599,16 @@ namespace PeepoDrumKit
 						Gui::PopID();
 				});
 
-				const JPOSScrollChange* JPOSScrollChangeAtCursor = course.JPOSScrollChanges.TryFindLastAtBeat(cursorBeat);
+				auto& curJPOSScrollList = course.GetJPOSScrollChanges(context.ChartSelectedBranch);
+				const JPOSScrollChange* JPOSScrollChangeAtCursor = curJPOSScrollList.TryFindLastAtBeat(cursorBeat);
 				const Complex JPOSScrollMoveAtCursor = (JPOSScrollChangeAtCursor != nullptr) ? JPOSScrollChangeAtCursor->Move : FallbackEvent<JPOSScrollChange>.Move;
 				const f32 JPOSScrollDurationAtCursor = (JPOSScrollChangeAtCursor != nullptr) ? JPOSScrollChangeAtCursor->Duration : FallbackEvent<JPOSScrollChange>.Duration;
 				auto insertOrUpdateCursorJPOSScrollChange = [&](Complex newMove, f32 newDuration)
 				{
 					if (JPOSScrollChangeAtCursor == nullptr || JPOSScrollChangeAtCursor->BeatTime != cursorBeat)
-						context.Undo.Execute<Commands::AddJPOSScroll>(&course, &course.JPOSScrollChanges, JPOSScrollChange{ cursorBeat, newMove, newDuration });
+						context.Undo.Execute<Commands::AddJPOSScroll>(&course, &curJPOSScrollList, JPOSScrollChange{ cursorBeat, newMove, newDuration });
 					else
-						context.Undo.Execute<Commands::UpdateJPOSScroll>(&course, &course.JPOSScrollChanges, JPOSScrollChange{ cursorBeat, newMove, newDuration });
+						context.Undo.Execute<Commands::UpdateJPOSScroll>(&course, &curJPOSScrollList, JPOSScrollChange{ cursorBeat, newMove, newDuration });
 				};
 
 				Gui::Property::Property([&]
@@ -2616,11 +2651,11 @@ namespace PeepoDrumKit
 								JPOSScrollMoveAtCursor, Clamp(v, MinJPOSScrollDuration, MaxJPOSScrollDuration)
 							);
 
-						Gui::PushID(&course.JPOSScrollChanges);
+						Gui::PushID(&curJPOSScrollList);
 						if (!disallowRemoveButton && JPOSScrollChangeAtCursor != nullptr && JPOSScrollChangeAtCursor->BeatTime == cursorBeat)
 						{
 							if (Gui::Button(UI_Str("ACT_EVENT_REMOVE"), { getInsertButtonWidth(), 0.0f }))
-								context.Undo.Execute<Commands::RemoveJPOSScroll>(&course, &course.JPOSScrollChanges, cursorBeat);
+								context.Undo.Execute<Commands::RemoveJPOSScroll>(&course, &curJPOSScrollList, cursorBeat);
 						}
 						else
 						{
@@ -2674,6 +2709,57 @@ namespace PeepoDrumKit
 					{
 						if (gogoRangeAtCursor != nullptr)
 							context.Undo.Execute<Commands::RemoveGoGoRange>(&course, &course.GoGoRanges, gogoRangeAtCursor->BeatTime);
+					}
+					Gui::EndDisabled();
+
+					Gui::PopID();
+				});
+
+				Gui::Property::PropertyTextValueFunc(UI_Str("EVENT_BRANCH_SECTIONS"), [&]
+				{
+					const b8 hasRangeSelection = timeline.RangeSelection.IsActiveAndHasEnd();
+					const BranchSection* bsAtCursor = course.BranchSections.TryFindOverlappingBeat(cursorBeat, cursorBeat);
+
+					Gui::PushID(&course.BranchSections);
+					Gui::BeginDisabled(!hasRangeSelection);
+					if (Gui::Button(UI_Str("ACT_EVENT_SET_FROM_RANGE_SELECTION"), { getInsertButtonWidth(), 0.0f }))
+					{
+						const Beat rangeMin = timeline.RoundBeatToCurrentGrid(timeline.RangeSelection.GetMin());
+						const Beat rangeMax = timeline.RoundBeatToCurrentGrid(timeline.RangeSelection.GetMax());
+						BranchSection newBS; newBS.BeatTime = rangeMin; newBS.BeatDuration = Max(Beat::Zero(), rangeMax - rangeMin);
+						context.Undo.Execute<Commands::AddSingleChartEvent<BranchSection>>(&course, &course.BranchSections, newBS);
+					}
+					Gui::EndDisabled();
+
+					Gui::BeginDisabled(bsAtCursor == nullptr);
+					if (Gui::Button(UI_Str("ACT_EVENT_REMOVE"), vec2(-1.0f, 0.0f)))
+					{
+						if (bsAtCursor != nullptr)
+							context.Undo.Execute<Commands::RemoveSingleChartEvent<BranchSection>>(&course, &course.BranchSections, bsAtCursor->BeatTime);
+					}
+					Gui::EndDisabled();
+
+					Gui::PopID();
+				});
+
+				Gui::Property::PropertyTextValueFunc(UI_Str("EVENT_SECTION_MARKERS"), [&]
+				{
+					const SectionMarker* smAtCursor = course.SectionMarkers.TryFindExactAtBeat(cursorBeat);
+
+					Gui::PushID(&course.SectionMarkers);
+					Gui::BeginDisabled(disableEditingAtPlayCursor);
+					if (smAtCursor == nullptr || smAtCursor->BeatTime != cursorBeat)
+					{
+						if (Gui::Button(UI_Str("ACT_EVENT_ADD"), { getInsertButtonWidth(), 0.0f }))
+						{
+							SectionMarker sm; sm.BeatTime = cursorBeat;
+							context.Undo.Execute<Commands::AddSingleChartEvent<SectionMarker>>(&course, &course.SectionMarkers, sm);
+						}
+					}
+					else
+					{
+						if (Gui::Button(UI_Str("ACT_EVENT_REMOVE"), { getInsertButtonWidth(), 0.0f }))
+							context.Undo.Execute<Commands::RemoveSingleChartEvent<SectionMarker>>(&course, &course.SectionMarkers, cursorBeat);
 					}
 					Gui::EndDisabled();
 

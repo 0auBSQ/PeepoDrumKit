@@ -170,27 +170,27 @@ namespace TJA
 
 	enum class NoteType : u8
 	{
-		// NOTE: ‹x•„
+		// NOTE: ï¿½xï¿½ï¿½
 		None,
 
-		// NOTE: ƒhƒ“
+		// NOTE: ï¿½hï¿½ï¿½
 		Don,
-		// NOTE: ƒJƒc
+		// NOTE: ï¿½Jï¿½c
 		Ka,
-		// NOTE: ƒhƒ“i‘åj
+		// NOTE: ï¿½hï¿½ï¿½ï¿½iï¿½ï¿½j
 		DonBig,
-		// NOTE: ƒJƒci‘åj
+		// NOTE: ï¿½Jï¿½cï¿½iï¿½ï¿½j
 		KaBig,
 
-		// NOTE: ˜A‘ÅŠJn
+		// NOTE: ï¿½Aï¿½ÅŠJï¿½n
 		Start_Drumroll,
-		// NOTE: ˜A‘Åi‘åjŠJn
+		// NOTE: ï¿½Aï¿½Åiï¿½ï¿½jï¿½Jï¿½n
 		Start_DrumrollBig,
-		// NOTE: ƒQƒL˜A‘ÅŠJn
+		// NOTE: ï¿½Qï¿½Lï¿½Aï¿½ÅŠJï¿½n
 		Start_Balloon,
-		// NOTE: ˜A‘ÅI—¹
+		// NOTE: ï¿½Aï¿½ÅIï¿½ï¿½
 		End_BalloonOrDrumroll,
-		// NOTE: ƒCƒ‚˜A‘ÅŠJn
+		// NOTE: ï¿½Cï¿½ï¿½ï¿½Aï¿½ÅŠJï¿½n
 		Start_BaloonSpecial,
 
 		// NOTE: Multiplayer
@@ -266,11 +266,11 @@ namespace TJA
 
 	enum class ScoreMode : u8
 	{
-		// NOTE: ƒhƒ“‚¾ƒtƒ‹”z“_iAC7ˆÈ‘Oj
+		// NOTE: ï¿½hï¿½ï¿½ï¿½ï¿½ï¿½tï¿½ï¿½ï¿½zï¿½_ï¿½iAC7ï¿½È‘Oï¿½j
 		AC2_To_AC7_Oni,
-		// NOTE: ‹Œ”z“_iAC14ˆÈ‘Oj
+		// NOTE: ï¿½ï¿½ï¿½zï¿½_ï¿½iAC14ï¿½È‘Oï¿½j
 		AC1_To_AC14,
-		// NOTE: V”z“_
+		// NOTE: ï¿½Vï¿½zï¿½_
 		AC15,
 		Count
 	};
@@ -517,6 +517,7 @@ namespace TJA
 		std::vector<ConvertedBarLineChange> BarLineChanges;
 		std::vector<ConvertedLyricChange> LyricChanges;
 		std::vector<ConvertedGoGoChange> GoGoChanges;
+		b8 HasSectionMarker = false; // outputs #SECTION at the start of this measure
 	};
 
 	struct ConvertedGoGoRange
